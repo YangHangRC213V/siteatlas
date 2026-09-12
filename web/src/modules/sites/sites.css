@@ -1,0 +1,215 @@
+/**
+ * 站点模块样式（只消费 tokens.css 变量）
+ */
+.sites-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(264px, 1fr));
+  gap: var(--sp-4);
+}
+
+.site-card {
+  background: var(--c-surface);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--sh-1);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: box-shadow var(--dur-base) var(--ease), transform var(--dur-base) var(--ease);
+}
+.site-card:hover {
+  box-shadow: var(--sh-2);
+  transform: translateY(-1px);
+}
+.site-card--archived {
+  opacity: 0.68;
+}
+.site-card__body {
+  flex: 1;
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  text-align: left;
+  padding: var(--sp-4);
+  background: none;
+  border: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  min-width: 0;
+}
+.site-card__folder {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-md);
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+  font-size: var(--fs-lg);
+}
+.site-card__meta {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+  flex: 1;
+}
+.site-card__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.site-card__name {
+  font-size: var(--fs-lg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.site-card__host {
+  color: var(--c-text-muted);
+}
+.site-card__stats,
+.site-card__time {
+  color: var(--c-text-muted);
+  font-size: var(--fs-sm);
+  display: flex;
+  gap: var(--sp-1);
+  flex-wrap: wrap;
+}
+.site-card__time {
+  color: var(--c-text-subtle);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.site-card__warn {
+  color: var(--c-danger);
+}
+.site-card__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--c-border);
+  background: var(--c-surface-2);
+}
+
+.create-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  margin-bottom: var(--sp-5);
+}
+.create-form__grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 2fr) minmax(160px, 1fr) minmax(140px, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+@media (max-width: 860px) {
+  .create-form__grid {
+    grid-template-columns: 1fr;
+  }
+}
+.create-form__actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.create-form__buttons {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+.sites-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+
+.skeleton-card {
+  height: 132px;
+}
+
+/* ---------- 站点详情（M0 占位页） ---------- */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--c-text-muted);
+  font-size: var(--fs-sm);
+  margin-bottom: var(--sp-3);
+}
+.breadcrumb__sep {
+  color: var(--c-text-subtle);
+}
+
+.detail-panel {
+  margin-bottom: var(--sp-4);
+}
+.detail-panel > h2 {
+  margin-bottom: var(--sp-3);
+}
+
+.kv {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: var(--sp-3) var(--sp-5);
+  margin: 0;
+}
+.kv__item {
+  min-width: 0;
+}
+.kv__item dt {
+  color: var(--c-text-subtle);
+  font-size: var(--fs-xs);
+  margin-bottom: 2px;
+}
+.kv__item dd {
+  margin: 0;
+  color: var(--c-text);
+  overflow-wrap: anywhere;
+}
+
+.module-tabs {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  margin: var(--sp-4) 0;
+}
+.module-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-md);
+  border: 1px solid var(--c-border-strong);
+  background: var(--c-surface);
+  color: var(--c-text);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease);
+}
+.module-tab:hover {
+  background: var(--c-surface-hover);
+}
+.module-tab--active {
+  background: var(--c-primary-soft);
+  border-color: var(--c-primary);
+  color: var(--c-primary);
+  font-weight: 600;
+}
+
+.placeholder {
+  border: 1px dashed var(--c-border-strong);
+  border-radius: var(--r-md);
+  padding: var(--sp-4);
+  color: var(--c-text-muted);
+  font-size: var(--fs-sm);
+}
