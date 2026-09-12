@@ -9,6 +9,11 @@
  *   ✅ 节点属性抽屉：改别名/标题/地址、还原为自动结果、修改历史
  *   ✅ 回收站：被软删的子树根，可恢复（恢复本身也可撤销）
  *   ✅ 检索走服务端 GET /search（正则/状态过滤）
+ *
+ * 本轮新增（requirements §4.5「其它易于理解和查看的拓扑展现形式」+ 原始网页视图）：
+ *   ✅ 五种展现形式：目录树（虚拟滚动）/ 缩进列表 / 层级图 / 关系图（力导向）/ 径向图
+ *   ✅ 网页视图：点任意节点的「查看网页」→ 服务端 Chromium 打开该节点原始页面（复用 M3 会话），
+ *      在画面里点到**未收录的链接**会立即建边建节点，树与图形视图自动刷新
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
@@ -16,7 +21,12 @@ import { NODE_STATUSES } from '@siteatlas/shared';
 import { navigate } from '../../router/useRoute.ts';
 import { sitesApi } from '../sites/api.ts';
 import { statusClass, statusLabel } from '../sites/types.ts';
-import { kindLabel, useTreeStore, type TreeRow } from './store.ts';
+import { deriveLabel, kindLabel, useTreeStore, type TreeRow, type TreeViewKind } from './store.ts';
+import { IndentedView } from './IndentedView.tsx';
+import { TopoView } from './TopoView.tsx';
+import { RemoteBrowserView } from '../../components/RemoteBrowserView.tsx';
+import { useManualStore } from '../manual/store.ts';
+import type { GraphNode } from './store.ts';
 import './tree.css';
 
 export interface TreePageProps {
@@ -27,6 +37,16 @@ const ROW_HEIGHT = 32;
 
 export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
   const [siteName, setSiteName] = useState<string | null>(null);
+  // 网页视图里的实时采集：会话每建一个节点就刷新树（点未收录链接 → 自动进拓扑）
+  const nodesCreated = useManualStore((s) => s.state?.nodesCreated ?? 0);
+  const manualSessionId = useManualStore((s) => s.sessionId);
+  const manualState = useManualStore((s) => s.state);
+  const manualViewport = useManualStore((s) => s.viewport);
+  const manualBind = useManualStore((s) => s.bind);
+  const manualUnbind = useManualStore((s) => s.unbind);
+  const manualStart = useManualStore((s) => s.start);
+  const manualStop = useManualStore((s) => s.stop);
+  const manualSend = useManualStore((s) => s.send);
   const rows = useTreeStore((s) => s.rows);
   const loading = useTreeStore((s) => s.loading);
   const error = useTreeStore((s) => s.error);
@@ -44,6 +64,12 @@ export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
   const depths = useTreeStore((s) => s.depths);
   const busy = useTreeStore((s) => s.busy);
   const dragging = useTreeStore((s) => s.dragging);
+  const viewKind = useTreeStore((s) => s.viewKind);
+  const graphNodes = useTreeStore((s) => s.graphNodes);
+  const graphTotal = useTreeStore((s) => s.graphTotal);
+  const graphTruncated = useTreeStore((s) => s.graphTruncated);
+  const graphLoading = useTreeStore((s) => s.graphLoading);
+  const webNodeId = useTreeStore((s) => s.webNodeId);
 
   const bind = useTreeStore((s) => s.bind);
   const unbind = useTreeStore((s) => s.unbind);
@@ -61,6 +87,10 @@ export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
   const moveNodes = useTreeStore((s) => s.moveNodes);
   const deleteNodes = useTreeStore((s) => s.deleteNodes);
   const undo = useTreeStore((s) => s.undo);
+  const setViewKind = useTreeStore((s) => s.setViewKind);
+  const loadGraph = useTreeStore((s) => s.loadGraph);
+  const refreshExpandedBranches = useTreeStore((s) => s.refreshExpandedBranches);
+  const setWebNode = useTreeStore((s) => s.setWebNode);
   const redo = useTreeStore((s) => s.redo);
   const revertNode = useTreeStore((s) => s.revertNode);
   const select = useTreeStore((s) => s.select);
@@ -68,6 +98,38 @@ export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
   const saveDetail = useTreeStore((s) => s.saveDetail);
   const clearNotice = useTreeStore((s) => s.clearNotice);
   const setDragging = useTreeStore((s) => s.setDragging);
+
+  /**
+   * 打开「原始网页」视图：
+   *   · 该站点还没有会话 → 先起一个（M3 的手动会话，画面走 CDP 串流）；
+   *   · 已有会话 → 直接让它打开这个节点的 URL；
+   * 打开后画面里的点击由 M3 的配对逻辑处理，点到未收录链接会自动建边建节点。
+   */
+  const openWebView = useCallback(
+    async (nodeId: string) => {
+      setWebNode(nodeId);
+      if (manualSessionId === null) {
+        await manualStart({ url: undefined });
+      }
+      const sessionId = useManualStore.getState().sessionId;
+      if (sessionId === null) return;
+      try {
+        const res = await fetch(`/api/manual/${encodeURIComponent(sessionId)}/open-node`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ nodeId }),
+        });
+        if (!res.ok) {
+          const body = (await res.json()) as { error?: { message?: string } };
+          throw new Error(body.error?.message ?? `HTTP ${res.status}`);
+        }
+      } catch (err) {
+        useTreeStore.setState({ error: `打开原始网页失败：${(err as Error).message}` });
+        setWebNode(null);
+      }
+    },
+    [manualSessionId, manualStart, setWebNode],
+  );
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   /** 拖拽悬停目标：null = 没有，'' = 根层，其他 = 节点 id */
@@ -83,6 +145,23 @@ export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
     void bind(siteId);
     return () => unbind();
   }, [bind, unbind, siteId]);
+
+  // 网页视图复用 M3 的手动会话：进入树视图时先看该站点有没有活动会话（有就直接能看画面）
+  useEffect(() => {
+    void manualBind(siteId);
+    return () => manualUnbind();
+  }, [manualBind, manualUnbind, siteId]);
+
+  /**
+   * 自动增量：网页视图里点到未收录的链接 → 会话建了节点 → 这里把树与图形视图刷新一遍。
+   * 依赖 `state.nodesCreated`（会话内新建节点数）而不是手动点「刷新」——
+   * requirements 要的是「点击未收录节点会自动添加节点拓扑信息」。
+   */
+  useEffect(() => {
+    if (manualSessionId === null || nodesCreated === 0) return;
+    void refreshExpandedBranches();
+    if (useTreeStore.getState().graphNodes.length > 0) void loadGraph();
+  }, [nodesCreated, manualSessionId, refreshExpandedBranches, loadGraph]);
 
   useEffect(() => {
     let cancelled = false;
@@ -313,15 +392,61 @@ export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
               <input type="checkbox" checked={regexMode} onChange={(e) => setRegexMode(e.target.checked)} />
               正则
             </label>
+            <label className="field tree-toolbar__view">
+              <span className="visually-hidden">展现形式</span>
+              <select
+                className="select"
+                data-testid="tree-view-kind"
+                value={viewKind}
+                onChange={(e) => void setViewKind(e.target.value as TreeViewKind)}
+                title="同一棵树的不同看法：目录树适合万级站点，缩进列表适合扫读，层级/关系/径向图适合看结构"
+              >
+                <option value="outline">目录树（虚拟滚动）</option>
+                <option value="indent">缩进列表（整树铺开）</option>
+                <option value="layered">层级图（按深度分层）</option>
+                <option value="force">关系图（力导向）</option>
+                <option value="radial">径向图（根在圆心）</option>
+              </select>
+            </label>
             <span className="field__hint">
               已加载 {rows.length} 行
               {searchHits !== null ? ` · 检索命中 ${searchHits.length} 个节点` : ''}
             </span>
           </div>
 
-          <div className="tree-layout">
+          <div className={`tree-layout${webNodeId !== null ? ' tree-layout--with-web' : ''}`}>
             <div className="panel tree-panel">
-              {loading && rows.length === 0 ? (
+              {viewKind === 'indent' || viewKind === 'layered' || viewKind === 'force' || viewKind === 'radial' ? (
+                <div className="tree-alt-view">
+                  {graphLoading && graphNodes.length === 0 ? (
+                    <div className="skeleton" style={{ height: 320 }} />
+                  ) : graphNodes.length === 0 ? (
+                    <div className="empty">
+                      <p>这个站点还没有节点。</p>
+                    </div>
+                  ) : viewKind === 'indent' ? (
+                    <IndentedView
+                      nodes={graphNodes}
+                      selectedId={detail?.node.id ?? null}
+                      onSelect={(nodeId) => void select(nodeId)}
+                      onOpen={(nodeId) => openWebView(nodeId)}
+                    />
+                  ) : (
+                    <TopoView
+                      nodes={graphNodes}
+                      layoutKind={viewKind}
+                      selectedId={detail?.node.id ?? null}
+                      onSelect={(nodeId) => void select(nodeId)}
+                      onOpen={(nodeId) => openWebView(nodeId)}
+                    />
+                  )}
+                  {graphTruncated && (
+                    <p className="field__hint">
+                      站点共 {graphTotal} 个节点，图形视图只画前 {graphNodes.length} 个（再多请用「导出」拿全量数据）。
+                    </p>
+                  )}
+                </div>
+              ) : loading && rows.length === 0 ? (
                 <div className="tree-skeleton" aria-busy="true">
                   {[0, 1, 2, 3, 4, 5].map((i) => (
                     <div key={i} className="skeleton" style={{ height: 22, marginBottom: 6 }} />
@@ -405,9 +530,20 @@ export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
               <header className="crawl-panel__head">
                 <h2>节点属性</h2>
                 {detail !== null ? (
-                  <button type="button" className="btn btn--sm btn--ghost" onClick={closeDetail}>
-                    关闭
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      className="btn btn--sm"
+                      data-testid="open-web-view"
+                      onClick={() => void openWebView(detail.node.id)}
+                      title="在右侧网页视图里打开该节点的原始页面；点到未收录的链接会自动加入拓扑"
+                    >
+                      🔗 查看原始网页
+                    </button>
+                    <button type="button" className="btn btn--sm btn--ghost" onClick={closeDetail}>
+                      关闭
+                    </button>
+                  </>
                 ) : null}
               </header>
               {detailLoading ? (
@@ -430,6 +566,52 @@ export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
                 />
               )}
             </aside>
+
+            {webNodeId !== null && (
+              <aside className="panel tree-web" aria-label="原始网页" data-testid="tree-web-view">
+                <header className="crawl-panel__head">
+                  <h2>原始网页</h2>
+                  <span className="field__hint">
+                    {manualState?.clicks.paired ?? 0} 次配对 → 新建 {manualState?.nodesCreated ?? 0} 个节点 /{' '}
+                    {manualState?.edgesCreated ?? 0} 条边
+                  </span>
+                  <button type="button" className="btn btn--sm btn--ghost" onClick={() => setWebNode(null)}>
+                    收起
+                  </button>
+                </header>
+
+                {manualSessionId === null ? (
+                  <div className="skeleton" style={{ height: 240 }} />
+                ) : (
+                  <>
+                    <div className="tree-web__bar">
+                      <input
+                        className="input mono"
+                        readOnly
+                        value={manualState?.current?.url ?? ''}
+                        title="当前网页地址（由所选节点决定）"
+                      />
+                      <button type="button" className="btn btn--sm" onClick={() => manualSend({ type: 'back-root' })}>
+                        回根
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn--sm btn--ghost"
+                        onClick={() => void manualStop()}
+                        title="结束后画面关闭；已采集到的节点与边都保留"
+                      >
+                        结束
+                      </button>
+                    </div>
+                    <RemoteBrowserView viewport={manualViewport} interactive={manualState?.status === 'running'} />
+                    <p className="field__hint">
+                      在画面里点击**未收录的链接**：会自动新建节点与边并刷新左侧拓扑（已收录的链接只补边，不重复建节点）。
+                      页内锚点/JS 行为等未触发导航的点击进「待确认」，可在采集页处理。
+                    </p>
+                  </>
+                )}
+              </aside>
+            )}
           </div>
         </>
       ) : (

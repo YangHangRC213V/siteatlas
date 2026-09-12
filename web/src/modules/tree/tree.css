@@ -254,3 +254,141 @@
 .link-button:hover {
   text-decoration: underline;
 }
+
+/* ---------- 展现形式切换（requirements §4.5：目录树之外的拓扑视图） ---------- */
+.tree-toolbar__view {
+  min-width: 190px;
+}
+/* 打开网页视图时：主区 + 属性 + 网页 三列 */
+.tree-layout--with-web {
+  grid-template-columns: minmax(0, 1.15fr) minmax(260px, 0.75fr) minmax(360px, 1.1fr);
+}
+@media (max-width: 1500px) {
+  .tree-layout--with-web {
+    grid-template-columns: minmax(0, 1fr) minmax(360px, 1fr);
+  }
+}
+.tree-alt-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-height: 380px;
+}
+
+/* 缩进列表：整树铺开，用缩进 + 细线表达层级 */
+.indent-view {
+  display: flex;
+  flex-direction: column;
+  max-height: 62vh;
+}
+.indent-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+}
+.indent-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  border-bottom: 1px solid var(--c-border);
+}
+.indent-row:hover {
+  background: var(--c-surface-hover);
+}
+.indent-row--selected {
+  background: var(--c-accent-soft);
+}
+.indent-row__toggle {
+  width: 18px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--c-text-muted);
+}
+.indent-row__toggle:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+.indent-row__label {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: var(--c-text);
+  text-align: left;
+  max-width: 46ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.indent-row__status {
+  flex: none;
+}
+
+/* 图形视图（层级/关系/径向）：SVG + 平移缩放 */
+.topo-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.topo-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.topo-canvas {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-surface);
+  height: 62vh;
+  overflow: hidden;
+  cursor: grab;
+}
+.topo-canvas:active {
+  cursor: grabbing;
+}
+.topo-link {
+  stroke: var(--c-border-strong);
+  stroke-width: 1;
+  fill: none;
+}
+.topo-node {
+  cursor: pointer;
+}
+.topo-node rect {
+  stroke: var(--c-border-strong);
+}
+.topo-node__label {
+  font-size: 11px;
+  fill: var(--c-text);
+}
+.topo-node--selected rect,
+.topo-node--selected circle {
+  stroke: var(--c-accent);
+  stroke-width: 2.5;
+}
+.topo-node--dim {
+  opacity: 0.35;
+}
+.topo-hint {
+  margin: 0;
+}
+
+/* 网页视图（复用 M3 会话语义：画面 + 采集统计） */
+.tree-web {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.tree-web__bar {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.tree-web__bar .input {
+  flex: 1;
+}

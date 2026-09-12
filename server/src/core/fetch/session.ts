@@ -176,8 +176,11 @@ export class ChromiumPageSession implements PageSession {
   private screencasting = false;
   private closed = false;
   private readonly onCdpFrame = (params: unknown): void => {
+    // 页面/会话正在关闭时 CDP 仍可能送出一帧：ack 必须以「失败就算了」的方式发，
+    // 否则会从事件回调里抛出未捕获的 rejection，把整个进程带崩（验收时真的崩过一次）
+    if (this.closed) return;
     const frame = params as { data: string; sessionId: number; metadata?: { deviceWidth?: number; deviceHeight?: number } };
-    void this.cdp?.send('Page.screencastFrameAck', { sessionId: frame.sessionId });
+    void this.cdp?.send('Page.screencastFrameAck', { sessionId: frame.sessionId }).catch(() => undefined);
     this.handlers.onFrame?.({
       data: frame.data,
       sessionId: frame.sessionId,
@@ -246,13 +249,24 @@ export class ChromiumPageSession implements PageSession {
     }
   }
 
+  /** 统一包装：会话已关闭/页面已销毁时的 CDP 失败不该变成未捕获异常 */
+  private async safeSend(method: string, params?: Record<string, unknown>): Promise<unknown> {
+    if (this.cdp === null || this.closed) return null;
+    try {
+      return await this.cdp.send(method, params);
+    } catch (err) {
+      if (this.closed) return null;
+      throw err;
+    }
+  }
+
   async injectCapture(script: string): Promise<void> {
     if (this.cdp === null) return;
     // 页面内提供 emitter 出口，注入脚本既可调用 binding 也可调用它
-    await this.cdp.send('Runtime.evaluate', {
+    await this.safeSend('Runtime.evaluate', {
       expression: `window.${this.emitterName} = (p) => window.${this.bindingName}(typeof p === 'string' ? p : JSON.stringify(p));`,
     });
-    await this.cdp.send('Runtime.evaluate', { expression: script });
+    await this.safeSend('Runtime.evaluate', { expression: script });
   }
 
   async startScreencast(options: { quality?: number; maxWidth?: number; maxHeight?: number } = {}): Promise<void> {
@@ -282,7 +296,7 @@ export class ChromiumPageSession implements PageSession {
       const r = el.getBoundingClientRect();
       return { x: r.x + r.width / 2, y: r.y + r.height / 2, width: r.width, height: r.height };
     })()`;
-    const result = (await this.cdp.send('Runtime.evaluate', { expression, returnByValue: true })) as {
+    const result = (await this.safeSend('Runtime.evaluate', { expression, returnByValue: true })) as {
       result?: { value?: unknown };
     };
     const value = result.result?.value;
@@ -317,13 +331,13 @@ export class ChromiumPageSession implements PageSession {
     } else if (input.type === 'mousePressed') {
       params['buttons'] = 1;
     }
-    await this.cdp.send('Input.dispatchMouseEvent', params);
+    await this.safeSend('Input.dispatchMouseEvent', params);
   }
 
   async dispatchKey(input: KeyInput): Promise<void> {
     if (this.cdp === null) return;
     const type = input.type === 'char' ? 'char' : input.type === 'keyUp' ? 'keyUp' : 'keyDown';
-    await this.cdp.send('Input.dispatchKeyEvent', {
+    await this.safeSend('Input.dispatchKeyEvent', {
       type,
       key: input.key,
       ...(input.code !== undefined ? { code: input.code } : {}),
@@ -335,7 +349,7 @@ export class ChromiumPageSession implements PageSession {
 
   async screenshot(): Promise<{ data: string; contentType: string }> {
     if (this.cdp !== null) {
-      const result = (await this.cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 70 })) as { data?: string };
+      const result = (await this.safeSend('Page.captureScreenshot', { format: 'jpeg', quality: 70 })) as { data?: string };
       if (typeof result.data === 'string') return { data: result.data, contentType: 'image/jpeg' };
     }
     return { data: '', contentType: 'image/jpeg' };

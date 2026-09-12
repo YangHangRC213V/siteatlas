@@ -103,6 +103,31 @@ export async function registerManualRoutes(app: FastifyInstance, service: Manual
     },
   );
 
+  /**
+   * 让当前会话打开某个**已在树里的节点**（树视图的「查看原始网页」按钮走这里）。
+   *
+   * 与 `/navigate`（WS 上行，手动输入地址）的区别：
+   *   · 这里只接受**已存在的节点 id**，URL 由服务端从节点取，前端不给地址；
+   *   · 这样「查看原始网页」永远不会把会话带到一个图外的地址上，
+   *     也就不会因为手输地址而破坏「点击 → 建边」的可信度。
+   */
+  app.post<{ Params: { sessionId: string }; Body: { nodeId: string } }>(
+    '/api/manual/:sessionId/open-node',
+    {
+      schema: {
+        params: { type: 'object', required: ['sessionId'], properties: { sessionId: { type: 'string' } } },
+        body: { type: 'object', required: ['nodeId'], additionalProperties: false, properties: { nodeId: { type: 'string' } } },
+      },
+    },
+    async (request) => {
+      const entry = service.require(request.params.sessionId);
+      const node = entry.session.nodeUrl(request.body.nodeId);
+      if (node === null) throw new ManualError('NODE_NOT_FOUND', `该会话所属站点没有这个节点：${request.body.nodeId}`, 404);
+      const result = await entry.session.navigate(node.url);
+      return { ok: result.ok, url: result.url, error: result.error, node };
+    },
+  );
+
   app.post<{ Params: { sessionId: string } }>('/api/manual/:sessionId/stop', async (request) => {
     const state = await service.stop(request.params.sessionId);
     if (state === null) throw new ManualError('SESSION_NOT_FOUND', `手动会话不存在：${request.params.sessionId}`, 404);

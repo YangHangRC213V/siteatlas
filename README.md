@@ -6,7 +6,7 @@
 - `docs/crawler-tool-dev-spec.md`（开发规格书 v1.0）—— 施工图
 - `docs/DECISIONS.md`（实现决策记录：规格未覆盖处的取舍与理由）
 
-## 当前状态：M0–M4 全部交付 + 设置模块
+## 当前状态：M0–M4 全部交付 + 设置模块 + 拓扑多视图与原始网页视图
 
 | 里程碑 | 状态 | 内容 |
 |---|---|---|
@@ -15,7 +15,8 @@
 | M2 树视图 | ✅ | 虚拟滚动、懒加载、属性面板、隐藏地址、软删、撤销重做、拖拽重挂、回收站 |
 | M3 手动采集 | ✅ | CDP 画面串流 + 输入回传 + 点击捕获 + 回根识别 + 展开一层（验收 25 项断言全过） |
 | M4 导出与开放 | ✅ | JSON/JSONL/CSV/SQLite/Mermaid 导出 + manifest + 对外只读 API（验收 28 项，含独立第三方脚本） |
-| 设置模块 | ✅ | 全局默认（礼貌与合规 / 采集默认值 / 素材归档 / 外观）+ 导出预设管理（验收 41 项合并跑） |
+| 设置模块 | ✅ | 全局默认（礼貌与合规 / 采集默认值 / 素材归档 / 外观）+ 导出预设管理 |
+| 拓扑多视图 + 网页视图 | ✅ | 缩进列表 / 层级图 / 关系图（力导向）/ 径向图 + 树内嵌原始网页视图（点未收录链接自动入拓扑）（验收 56 项合并跑） |
 
 
 M1 已实现的关键机制（详见 `docs/DECISIONS.md`）：
@@ -25,6 +26,20 @@ M1 已实现的关键机制（详见 `docs/DECISIONS.md`）：
 - **礼貌**：默认 1s/请求 + 抖动、并发 5、按域并发 2、UA 可配；
 - **可控**：暂停/继续/停止，队列与访问计数全部落库，进程重启后 `running → paused` 复位并可续跑；
 - **进度**：WS `/ws/sites/:id` 推送（400ms 节流），断线自动降级为 1.5s 轮询。
+
+结构视图（`/sites/:id/tree`）的多种看树方式：
+
+- **五种展现形式**（同一份数据的五个视角，工具栏一键切换）：
+  - 目录树：虚拟滚动 + 懒加载 + 拖拽重挂 + 撤销重做（万级站点用它）；
+  - 缩进列表：整树铺开（最多 5000，超出提示），适合扫读与浏览器查找；
+  - 层级图：按深度分层，适合看目录层级与同层规模；
+  - 关系图：力导向（自研确定性布局，固定轮数 + 自适应铺满），适合看「谁连到谁、哪里扎堆」；
+  - 径向图：根在圆心、按深度成环，适合看「几层、每层多少」。
+- **原始网页视图**：选中任意节点 → 「🔗 查看原始网页」→ 右侧内嵌服务端 Chromium 的真实画面（复用 M3 会话，
+  不另起浏览器）。在画面里点到**未收录的链接**会立即建边建节点，左侧拓扑自动刷新
+  —— 也就是「一边看页面一边补图」。
+- 前端不做图形库依赖：布局算法在 `web/src/modules/tree/layout.ts`（纯函数、可单测、**确定性**，图不会每次打开都跳），
+  渲染用 SVG（层级图用父子折线连接，点节点选中、双击打开原始网页）。
 
 设置模块（导航「设置」）：
 
@@ -106,7 +121,7 @@ npm run dev          # server 用 tsx watch（:8787），web 用 vite（:5173，
 ## 校验
 
 ```bash
-npm test             # node --test：URL 规范化/范围、迁移与 DDL、/api/sites、采集内核与接口、WS、手动会话、导出与只读 API、设置与预设（116 项）
+npm test             # node --test：server 全部 + web 的图形布局（123 项：URL 规范化/迁移与 DDL/采集内核/WS/手动会话/导出与只读 API/设置与预设/拓扑布局）
 npm run typecheck    # shared + server + web 三处 tsc --noEmit
 
 node scripts/demo-site.mjs 8899      # 起本地演示站（多级/多父/变体/404/robots/素材/SPA/分页）
@@ -115,7 +130,7 @@ node scripts/e2e-m0-screenshot.mjs   # M0 端到端 + 截图
 node scripts/e2e-m1-crawl.mjs        # M1 端到端：建站→订阅 WS→采集→树→自检→截图（14 项断言）
 node scripts/e2e-m2-tree.mjs         # M2 端到端：拖拽重挂/撤销重做/批量/属性/回收站/12k 节点压测（18 项断言）
 node scripts/e2e-m3-manual.mjs       # M3 端到端：真实 Chromium 手动点选建边/回根不重复建节点/展开一层/待确认确认与丢弃（25 项断言）
-node scripts/e2e-m4-export.mjs       # M4 端到端：五种格式导出 + manifest + 只读 API + 独立第三方脚本消费 + 设置/预设（41 项断言）
+node scripts/e2e-m4-export.mjs       # M4 端到端：五种格式导出 + manifest + 只读 API + 第三方脚本 + 设置/预设 + 拓扑多视图 + 网页视图（56 项断言）
 ```
 
 ## 目录结构（dev-spec §3）
@@ -139,6 +154,8 @@ web/src/
   modules/sites/  SitesPage  SiteDetailPage  SiteSubPage  SiteCard  CreateSiteForm  store  api  types
   modules/crawl/  CrawlPage  store  api  crawl.css           # 采集控制台（M1）
   modules/tree/   TreePage  store  api  tree.css             # 虚拟滚动树视图 + 修正层交互（M2）
+                  IndentedView.tsx  TopoView.tsx  layout.ts  # 缩进列表 / 层级图 / 关系图 / 径向图 + 布局算法
+  components/     RemoteBrowserView.tsx                      # 服务端 Chromium 画面（手动采集页与树视图共用）
   modules/manual/ ManualPage  RemoteBrowserView  store  api  manual.css   # 手动采集控制台（M3）
   modules/export/ ExportPage  store  api  export.css        # 导出控制台 + manifest 展示（M4）
   modules/settings/ SettingsPage  store  api  theme.ts  settings.css   # 全局设置与预设（表单由契约生成）

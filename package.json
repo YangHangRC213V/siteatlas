@@ -16,7 +16,7 @@
     "build": "npm run build -w @siteatlas/shared && npm run build -w @siteatlas/web",
     "start": "npm run build && npm run start -w @siteatlas/server",
     "dev": "npm run dev --workspaces --if-present",
-    "test": "node --test \"server/src/**/*.test.ts\"",
+    "test": "node --test \"server/src/**/*.test.ts\" \"web/src/**/*.test.ts\"",
     "typecheck": "npm run typecheck -w @siteatlas/shared && npm run typecheck -w @siteatlas/server && npm run typecheck -w @siteatlas/web"
   },
   "license": "MIT",

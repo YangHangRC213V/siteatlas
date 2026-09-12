@@ -27,6 +27,20 @@ export interface TreeRow {
 
 export type TreeMode = 'tree' | 'trash';
 
+/** 树的展现形式（requirements §4.5：目录树之外的其它拓扑视图） */
+export type TreeViewKind = 'outline' | 'indent' | 'layered' | 'force' | 'radial';
+
+/** 图形视图用的节点（由整树平面列表折算，字段与 layout.ts 的 TopoNode 对齐） */
+export interface GraphNode {
+  id: string;
+  url: string;
+  label: string;
+  depth: number;
+  parentId: string | null;
+  childCount: number;
+  status: string;
+}
+
 export interface TreeStoreState {
   siteId: string | null;
   rows: TreeRow[];
@@ -53,6 +67,16 @@ export interface TreeStoreState {
   busy: boolean;
   /** 拖拽中的节点 id（多选时可能是多个） */
   dragging: string[];
+
+  /** 当前展现形式（目录树 / 缩进列表 / 层级图 / 关系图 / 径向图） */
+  viewKind: TreeViewKind;
+  /** 图形视图的数据（懒加载：切到图形视图时才拉整树） */
+  graphNodes: GraphNode[];
+  graphTotal: number;
+  graphTruncated: boolean;
+  graphLoading: boolean;
+  /** 正在查看原始网页的节点（null = 未打开网页视图） */
+  webNodeId: string | null;
 
   bind: (siteId: string) => Promise<void>;
   unbind: () => void;
@@ -82,6 +106,9 @@ export interface TreeStoreState {
   saveDetail: (patch: { alias?: string | null; title?: string | null; url?: string }) => Promise<void>;
   clearNotice: () => void;
   setDragging: (ids: string[]) => void;
+  setViewKind: (kind: TreeViewKind) => Promise<void>;
+  loadGraph: () => Promise<void>;
+  setWebNode: (nodeId: string | null) => void;
 }
 
 const KIND_LABELS: Record<string, string> = {
@@ -93,6 +120,25 @@ const KIND_LABELS: Record<string, string> = {
   reverted: '还原为自动结果',
   locked: '锁定',
 };
+
+/** 行标签：别名 > 标题 > 展示标签 > 路径末段（§6.4 的优先级，与树视图一致） */
+export function deriveLabel(node: {
+  alias?: string | null;
+  title?: string | null;
+  display_label?: string | null;
+  url: string;
+}): string {
+  const candidates = [node.alias, node.title, node.display_label];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) return candidate.trim();
+  }
+  try {
+    const url = new URL(node.url);
+    return url.pathname === '/' || url.pathname === '' ? url.host : url.pathname;
+  } catch {
+    return node.url;
+  }
+}
 
 export function kindLabel(kind: string): string {
   return KIND_LABELS[kind] ?? kind;
@@ -133,6 +179,13 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   busy: false,
   dragging: [],
 
+  viewKind: 'outline',
+  graphNodes: [],
+  graphTotal: 0,
+  graphTruncated: false,
+  graphLoading: false,
+  webNodeId: null,
+
   async bind(siteId) {
     if (get().siteId === siteId && get().rows.length > 0) return;
     set({ siteId, rows: [], detail: null, error: null, query: '', statusFilter: null, mode: 'tree', trash: [], searchHits: null });
@@ -141,7 +194,57 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   },
 
   unbind() {
-    set({ siteId: null, rows: [], detail: null, error: null, searchHits: null });
+    set({
+      siteId: null,
+      rows: [],
+      detail: null,
+      error: null,
+      searchHits: null,
+      graphNodes: [],
+      graphTotal: 0,
+      graphTruncated: false,
+      webNodeId: null,
+    });
+  },
+
+  /**
+   * 切换展现形式。图形视图需要整树数据，因此**第一次切过去时才拉**（懒加载）：
+   * 万级站点的整树查询不该在打开目录树时就白白付一次代价。
+   */
+  async setViewKind(kind) {
+    set({ viewKind: kind });
+    // 除目录树（虚拟滚动，数据来自懒加载的 rows）以外，四种视图都要整树数据
+    if (kind !== 'outline') await get().loadGraph();
+  },
+
+  /** 拉整树平面列表（图形视图 + 缩进列表用） */
+  async loadGraph() {
+    const siteId = get().siteId;
+    if (siteId === null) return;
+    set({ graphLoading: true });
+    try {
+      const page = await treeApi.flat(siteId, 5000);
+      set({
+        graphLoading: false,
+        graphTotal: page.total,
+        graphTruncated: page.truncated,
+        graphNodes: page.nodes.map((node) => ({
+          id: node.id,
+          url: node.url,
+          label: deriveLabel(node),
+          depth: node.depth,
+          parentId: node.effective_parent_id,
+          childCount: node.child_count,
+          status: node.status,
+        })),
+      });
+    } catch (err) {
+      set({ graphLoading: false, error: err instanceof TreeApiError ? err.message : String(err) });
+    }
+  },
+
+  setWebNode(nodeId) {
+    set({ webNodeId: nodeId });
   },
 
   async loadRoot() {

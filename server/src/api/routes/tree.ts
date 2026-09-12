@@ -178,6 +178,49 @@ export async function registerTreeRoutes(app: FastifyInstance, deps: TreeRouteDe
     },
   );
 
+  /* ---------------- 整树平面列表（图形视图 / 缩进列表用） ---------------- */
+
+  app.get<{ Params: { id: string }; Querystring: { limit?: string } }>(
+    '/api/sites/:id/tree/flat',
+    {
+      schema: {
+        params: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
+        querystring: {
+          type: 'object',
+          additionalProperties: false,
+          properties: { limit: { type: 'string' } },
+        },
+        response: {
+          200: {
+            type: 'object',
+            additionalProperties: true,
+            properties: {
+              nodes: { type: 'array', items: makeTreeNodeSchema() },
+              total: { type: 'integer' },
+              limit: { type: 'integer' },
+              truncated: { type: 'boolean' },
+            },
+          },
+        },
+      },
+    },
+    async (request) => {
+      const siteId = request.params.id;
+      if (sites.get(siteId) === null) {
+        throw new SiteServiceError('SITE_NOT_FOUND', `站点不存在：${siteId}`, 404);
+      }
+      // 上限 5000：图形布局在前端内存里跑，再多就该走导出而不是画图
+      const limit = Math.min(5000, Math.max(1, Number(request.query.limit ?? 5000) || 5000));
+      const page = nodes.flatForSite(siteId, limit);
+      return {
+        nodes: page.nodes,
+        total: page.total,
+        limit,
+        truncated: page.total > page.nodes.length,
+      };
+    },
+  );
+
   /* ---------------- 节点详情（含修正历史） ---------------- */
 
   app.get<{ Params: { id: string } }>(

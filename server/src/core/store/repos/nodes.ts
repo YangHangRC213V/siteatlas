@@ -393,6 +393,54 @@ export class NodesRepo {
     };
   }
 
+  /**
+   * 整树平面列表（有效投影），按深度 + id 排序，供「图形视图」（层级图/关系图）使用。
+   *
+   * 为什么不复用 childrenPage：懒加载接口一次最多 500 行、且要逐层递归请求，
+   * 画图需要**一次拿到同一批节点**才能做布局。这里给一个带上限的整体查询，
+   * 由调用方根据 `total` 判断是否被截断（前端会提示「只画了前 N 个」）。
+   */
+  flatForSite(siteId: string, limit = 5000): { nodes: Array<NodeRecord & { effective_parent_id: string | null; has_override: boolean; child_count: number }>; total: number } {
+    const totalRow = this.db
+      .prepare(
+        `SELECT COUNT(*) AS c FROM (
+           SELECT ${effectiveProjection('v')} FROM v_nodes_effective v WHERE v.site_id = ?
+         ) t WHERE t.is_deleted = 0`,
+      )
+      .get(siteId) as Row;
+    const rows = this.db
+      .prepare(
+        `SELECT t.*,
+                (SELECT COUNT(*) FROM v_nodes_effective c
+                  WHERE c.site_id = t.site_id AND c.effective_parent_id = t.id
+                    AND c.is_deleted = 0
+                    AND NOT EXISTS (SELECT 1 FROM node_overrides od
+                                    WHERE od.node_id = c.id AND od.field = 'deleted' AND od.undone = 0 AND od.value = '1')
+                ) AS child_count
+         FROM (
+           SELECT ${effectiveProjection('v')}, ${hasOverrideExpr('v')} AS has_override
+           FROM v_nodes_effective v WHERE v.site_id = ?
+         ) t
+         WHERE t.is_deleted = 0
+         ORDER BY t.depth ASC, t.id ASC
+         LIMIT ?`,
+      )
+      .all(siteId, limit) as Row[];
+    return {
+      total: Number(totalRow['c'] ?? 0),
+      nodes: rows.map((r) => {
+        const node = toNode(r) as unknown as NodeRecord & {
+          effective_parent_id: string | null;
+          has_override: boolean;
+          child_count: number;
+        };
+        node.has_override = Number(r['has_override'] ?? 0) > 0;
+        node.child_count = Number(r['child_count'] ?? 0);
+        return node;
+      }),
+    };
+  }
+
   /** 站点全部未删节点的 id/url（供导出与测试断言，M1 用于「无重复」自检） */
   allIdentityKeys(siteId: string): string[] {
     const rows = this.db

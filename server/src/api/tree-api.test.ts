@@ -317,3 +317,30 @@ test('M2 REST：撤销栈空/重做栈空返回 409；检索走服务端过滤',
     await h.close();
   }
 });
+
+test('M4 接口：整树平面列表（图形视图用）—— 上限、截断标记与有效父节点', async () => {
+  const h = await makeHarness();
+  try {
+    const res = await h.app.inject({ method: 'GET', url: `/api/sites/${h.siteId}/tree/flat` });
+    assert.equal(res.statusCode, 200);
+    const body = res.json() as { nodes: Array<{ id: string; depth: number; effective_parent_id: string | null }>; total: number; limit: number; truncated: boolean };
+    assert.ok(body.nodes.length > 1, '应返回整棵树的节点');
+    assert.equal(body.total, body.nodes.length);
+    assert.equal(body.truncated, false);
+    assert.equal(body.nodes[0]?.depth, 0, '按深度排序，根在最前');
+    assert.equal(body.nodes[0]?.effective_parent_id, null);
+
+    // 上限：只要 2 个 → 截断标记为真
+    const limited = await h.app.inject({ method: 'GET', url: `/api/sites/${h.siteId}/tree/flat?limit=2` });
+    const limitedBody = limited.json() as { nodes: unknown[]; total: number; truncated: boolean };
+    assert.equal(limitedBody.nodes.length, 2);
+    assert.equal(limitedBody.truncated, true);
+    assert.ok(limitedBody.total > 2);
+
+    // 不存在的站点 → 404
+    const missing = await h.app.inject({ method: 'GET', url: '/api/sites/01ZZZZZZZZZZZZZZZZZZZZZZZZ/tree/flat' });
+    assert.equal(missing.statusCode, 404);
+  } finally {
+    await h.close();
+  }
+});

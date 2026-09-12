@@ -66,6 +66,18 @@ export const treeApi = {
     if (parentId !== null) params.set('parentId', parentId);
     return request<TreeResponse>(`/api/sites/${encodeURIComponent(siteId)}/tree?${params.toString()}`);
   },
+  /** 整树平面列表（图形视图用；一次最多 5000 个节点，超出返回 truncated） */
+  flat(
+    siteId: string,
+    limit = 5000,
+  ): Promise<{
+    nodes: Array<TreeNodeRow & { effective_parent_id: string | null; has_override: boolean; child_count: number }>;
+    total: number;
+    limit: number;
+    truncated: boolean;
+  }> {
+    return request(`/api/sites/${encodeURIComponent(siteId)}/tree/flat?limit=${limit}`);
+  },
   trash(siteId: string): Promise<TrashResponse> {
     return request<TrashResponse>(`/api/sites/${encodeURIComponent(siteId)}/tree?trash=1`);
   },

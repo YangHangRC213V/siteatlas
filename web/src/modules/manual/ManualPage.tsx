@@ -8,7 +8,7 @@
 import { useEffect, useState } from 'react';
 import { navigate } from '../../router/useRoute.ts';
 import { sitesApi } from '../sites/api.ts';
-import { RemoteBrowserView } from './RemoteBrowserView.tsx';
+import { RemoteBrowserView } from '../../components/RemoteBrowserView.tsx';
 import { useManualStore } from './store.ts';
 import { MANUAL_STATUS_LABELS } from './types.ts';
 import './manual.css';

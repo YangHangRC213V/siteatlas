@@ -1,6 +1,9 @@
 /**
  * RemoteBrowserView —— 把服务端 Chromium 的画面画进 <canvas>，并把交互折成 CDP 输入回传（dev-spec §6.5）
  *
+ * 放在 components/ 而不是 modules/manual/：手动采集页与树视图的「网页视图」共用同一个会话与画面，
+ * 两个模块各自持有一份实现必然会漂移（坐标换算这类细节最容易各修一半）。
+ *
  * 关键点：
  *   1. 画面是 JPEG base64 帧，直接 <img> 会闪烁 → 用 Image 预解码后 drawImage 到 canvas；
  *   2. 坐标换算：canvas 是等比缩放显示的，事件坐标（CSS 像素）要按
@@ -10,7 +13,7 @@
  *   4. 滚轮：浏览器会把 wheel 折成连续事件并 preventDefault 掉页面滚动，避免画布外滚动。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useManualStore } from './store.ts';
+import { useManualStore } from '../modules/manual/store.ts';
 
 export interface RemoteBrowserViewProps {
   /** 页面视口（来自会话） */

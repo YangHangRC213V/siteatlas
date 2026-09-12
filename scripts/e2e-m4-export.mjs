@@ -402,6 +402,114 @@ const openLink = await page.locator('.export-endpoints a').first().getAttribute(
 check('界面上给出只读 API 地址', openLink !== null && openLink.startsWith('/open/v1/'), openLink ?? '未找到');
 
 
+/* ---------------- 5.4) 拓扑展现形式 + 原始网页视图（自动化增量） ---------------- */
+// 换一种展现形式看同一棵树
+await page.goto(`${baseUrl}/sites/${siteId}/tree`, { waitUntil: 'networkidle' });
+await page.waitForSelector('.tree-row');
+for (const [kind, selector, label] of [
+  ['indent', '.indent-row', '缩进列表'],
+  ['layered', '.topo-view[data-layout="layered"]', '层级图'],
+  ['force', '.topo-view[data-layout="force"]', '关系图'],
+  ['radial', '.topo-view[data-layout="radial"]', '径向图'],
+]) {
+  await page.selectOption('[data-testid="tree-view-kind"]', kind);
+  await page.waitForTimeout(900);
+  const count = await page.locator(selector).count();
+  check(`拓扑展现形式可用：${label}`, count > 0, `${count} 个元素`);
+  if (kind === 'force') await shot('m5-04-tree-force.png');
+}
+await page.selectOption('[data-testid="tree-view-kind"]', 'outline');
+await page.waitForTimeout(500);
+
+// 网页视图：走真实界面路径 —— 在目录树里点中一个节点，再点「查看原始网页」
+const flatBefore = await api(`/api/sites/${siteId}/tree/flat`);
+const paged3 = flatBefore.nodes.find((node) => node.url.endsWith('/paged?page=3')) ?? flatBefore.nodes[0];
+const sessionsBefore = (await api('/api/manual/sessions')).sessions.length;
+
+// 用缩进列表定位到该节点（整树铺开、带 data-node-id，最稳），点行选中 → 回目录树 → 点「查看原始网页」
+await page.selectOption('[data-testid="tree-view-kind"]', 'indent');
+await page.waitForSelector('.indent-row', { timeout: 15000 });
+const indentRow = page.locator(`.indent-row[data-node-id="${paged3.id}"]`);
+check('缩进列表能定位到指定节点', (await indentRow.count()) === 1, paged3.url);
+await indentRow.locator('.indent-row__label').click();
+await page.selectOption('[data-testid="tree-view-kind"]', 'outline');
+await page.waitForTimeout(600);
+await page.waitForSelector('[data-testid="open-web-view"]', { timeout: 10000 });
+check('节点属性面板提供「查看原始网页」入口', true, '按钮可见');
+await page.locator('[data-testid="open-web-view"]').click();
+await page.waitForSelector('[data-testid="tree-web-view"] canvas', { timeout: 60000 });
+await page.waitForFunction(
+  () => {
+    const canvas = document.querySelector('[data-testid="tree-web-view"] canvas');
+    return canvas !== null && canvas.width > 100 && canvas.height > 100;
+  },
+  null,
+  { timeout: 60000 },
+);
+check('网页视图：点「查看原始网页」后画面串流到树视图内', true, 'canvas 已出画面');
+await page.screenshot({ path: resolve(outDir, 'm5-05-tree-web-view.png') });
+console.log('截图 → m5-05-tree-web-view.png');
+const sessionState = (await api(`/api/sites/${siteId}/manual`)).state;
+check(
+  '网页视图：当前页 = 所选节点的 URL',
+  sessionState?.current?.url === paged3.url,
+  `${sessionState?.current?.url ?? '无'}`,
+);
+check('网页视图：会话已就绪（未重复起会话）', (await api('/api/manual/sessions')).sessions.length === Math.max(1, sessionsBefore), `${(await api('/api/manual/sessions')).sessions.length} 个会话`);
+
+// 核心：在画面里点一个**未收录**的链接 → 自动建节点进拓扑
+const nodesBeforeClick = (await api(`/api/sites/${siteId}/tree/flat`)).total;
+const unrecorded = flatBefore.nodes.some((node) => node.url.endsWith('/paged?page=4')) === false;
+check('前置条件：/paged?page=4 尚未收录', unrecorded, `${nodesBeforeClick} 个节点`);
+const linkBox = await api(`/api/manual/${sessionState.sessionId}/element?selector=${encodeURIComponent('a[href="/paged?page=4"]')}`);
+check('远端页面里能定位到未收录链接的坐标', linkBox.box !== null, JSON.stringify(linkBox.box));
+
+// 用真实的输入回传点击（和人工在画面里点是一样的路径）
+await page.evaluate(
+  async ({ sessionId, box }) => {
+    const ws = new WebSocket(`${location.origin.replace('http', 'ws')}/ws/manual/${sessionId}`);
+    await new Promise((resolve, reject) => {
+      ws.onopen = () => resolve();
+      ws.onerror = reject;
+    });
+    const send = (message) => ws.send(JSON.stringify(message));
+    send({ type: 'mouse', mouse: { type: 'mouseMoved', x: box.x, y: box.y } });
+    send({ type: 'mouse', mouse: { type: 'mousePressed', x: box.x, y: box.y, button: 'left', clickCount: 1 } });
+    send({ type: 'mouse', mouse: { type: 'mouseReleased', x: box.x, y: box.y, button: 'left', clickCount: 1 } });
+    await new Promise((r) => setTimeout(r, 1200));
+    ws.close();
+  },
+  { sessionId: sessionState.sessionId, box: linkBox.box },
+);
+await page.waitForTimeout(2500);
+const flatAfter = await api(`/api/sites/${siteId}/tree/flat`);
+const createdNode = flatAfter.nodes.find((node) => node.url.endsWith('/paged?page=4'));
+check(
+  '点击画面里未收录的链接 → 自动新增节点（拓扑增量）',
+  createdNode !== undefined && flatAfter.total === nodesBeforeClick + 1,
+  `${nodesBeforeClick} → ${flatAfter.total}`,
+);
+check(
+  '新增节点的父节点 = 点击时所在页（边也建对了）',
+  createdNode?.effective_parent_id === paged3.id,
+  `parent=${createdNode?.effective_parent_id ?? '无'}`,
+);
+const sessionAfterClick = (await api(`/api/sites/${siteId}/manual`)).state;
+check(
+  '会话统计记到这次配对（paired +1）',
+  (sessionAfterClick?.clicks.paired ?? 0) >= 1,
+  `paired=${sessionAfterClick?.clicks.paired ?? 0}`,
+);
+// 图形视图能看到新节点
+await page.selectOption('[data-testid="tree-view-kind"]', 'indent');
+await page.waitForTimeout(1200);
+const indentRows = await page.locator('.indent-row').count();
+check('切换视图后能看到新节点（图形视图已刷新）', indentRows >= flatAfter.total, `${indentRows} 行 / ${flatAfter.total} 个节点`);
+await page.selectOption('[data-testid="tree-view-kind"]', 'outline');
+await page.waitForTimeout(600);
+await shot('m5-03-tree-auto-added-node.png');
+await api(`/api/manual/${sessionState.sessionId}/stop`, { method: 'POST' }).catch(() => undefined);
+
 /* ---------------- 5.5) 设置页界面：改了要能落库、外观要立即生效 ---------------- */
 await page.goto(`${baseUrl}/settings`, { waitUntil: 'networkidle' });
 await page.waitForSelector('.settings-page');

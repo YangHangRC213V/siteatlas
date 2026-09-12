@@ -492,6 +492,13 @@ export class ManualSession {
     return { ...node, __fresh: created };
   }
 
+  /** 取本会话所属站点里某个节点的 URL（树视图「查看原始网页」用；跨站返回 null） */
+  nodeUrl(nodeId: string): { id: string; url: string; displayLabel: string | null } | null {
+    const node = this.nodes.get(nodeId);
+    if (node === null || node.site_id !== this.deps.siteId) return null;
+    return { id: node.id, url: node.url, displayLabel: node.display_label };
+  }
+
   /* ---------------- 展开一层（§4.3 手动工具条 / §6.5 记录并展开） ---------------- */
 
   /**
