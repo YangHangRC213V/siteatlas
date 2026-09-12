@@ -1,0 +1,203 @@
+/* 采集模块样式（只消费 tokens.css 变量） */
+.crawl-controlbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.crawl-status {
+  font-size: var(--fs-sm);
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-pill);
+  background: var(--c-surface-2);
+  color: var(--c-text-muted);
+  border: 1px solid var(--c-border);
+}
+.crawl-status--running {
+  background: var(--c-accent-soft);
+  color: var(--c-accent);
+  border-color: var(--c-accent);
+}
+.crawl-status--paused {
+  background: var(--c-warning-soft);
+  color: var(--c-warning);
+  border-color: var(--c-warning);
+}
+.crawl-status--done {
+  background: var(--c-success-soft);
+  color: var(--c-success);
+  border-color: var(--c-success);
+}
+.crawl-status--failed,
+.crawl-status--stopped {
+  background: var(--c-danger-soft);
+  color: var(--c-danger);
+  border-color: var(--c-danger);
+}
+
+.crawl-layout {
+  display: grid;
+  grid-template-columns: minmax(340px, 1.35fr) minmax(300px, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+@media (max-width: 1020px) {
+  .crawl-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.crawl-preset,
+.crawl-progress {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.crawl-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.crawl-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--sp-3);
+}
+.crawl-grid__wide {
+  grid-column: 1 / -1;
+}
+.crawl-grid__check {
+  grid-column: 1 / -1;
+}
+
+.crawl-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: var(--sp-2);
+}
+.metric {
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.metric__value {
+  font-size: var(--fs-xl);
+  font-weight: 600;
+  line-height: 1.1;
+}
+.metric__value--ok {
+  color: var(--c-success);
+}
+.metric__value--error {
+  color: var(--c-danger);
+}
+.metric__label {
+  font-size: var(--fs-xs);
+  color: var(--c-text-subtle);
+}
+
+.crawl-bar {
+  height: 8px;
+  border-radius: var(--r-pill);
+  background: var(--c-surface-2);
+  border: 1px solid var(--c-border);
+  overflow: hidden;
+}
+.crawl-bar__fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--c-primary), var(--c-accent));
+  transition: width var(--dur-base) var(--ease);
+}
+
+.crawl-subhead {
+  font-size: var(--fs-sm);
+  color: var(--c-text-muted);
+  font-weight: 600;
+  margin-top: var(--sp-2);
+}
+
+.depth-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.depth-list__item {
+  display: grid;
+  grid-template-columns: 64px 1fr 48px;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+}
+.depth-list__label {
+  color: var(--c-text-muted);
+}
+.depth-list__bar {
+  height: 6px;
+  background: var(--c-surface-2);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+.depth-list__fill {
+  display: block;
+  height: 100%;
+  background: var(--c-primary);
+  opacity: 0.75;
+}
+.depth-list__count {
+  text-align: right;
+  color: var(--c-text-muted);
+}
+
+.crawl-logs {
+  margin-top: var(--sp-4);
+}
+.log-list {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  max-height: 280px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.log-list__item {
+  display: grid;
+  grid-template-columns: 48px 1fr minmax(120px, 220px);
+  gap: var(--sp-3);
+  align-items: center;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-sm);
+  font-size: var(--fs-sm);
+}
+.log-list__item:not(:last-child) {
+  border-bottom: 1px solid var(--c-border);
+}
+.log-list__item--error {
+  background: var(--c-danger-soft);
+}
+.log-list__status {
+  font-family: var(--font-mono);
+  color: var(--c-text-muted);
+}
+.log-list__url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.log-list__error {
+  color: var(--c-danger);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

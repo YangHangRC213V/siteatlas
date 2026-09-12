@@ -29,7 +29,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     res = await fetch(path, {
       ...init,
-      headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) },
+      // 仅在有 body 时声明 content-type：DELETE 等空 body 请求带该头会被 Fastify 拒为 400
+      headers: { ...(init?.body !== undefined ? { 'content-type': 'application/json' } : {}), ...(init?.headers ?? {}) },
     });
   } catch (err) {
     throw new ApiError(0, 'NETWORK_ERROR', `无法连接服务端：${(err as Error).message}`);

@@ -29,6 +29,7 @@ export function AppShell({ active, siteId, children }: AppShellProps): React.JSX
 
   const targetPath = (m: ModuleDef): string => {
     if (m.key === 'sites') return '/sites';
+    if (m.key === 'settings') return '/settings';
     // 站点级模块：有选中站点则进入该站点上下文，否则回站点列表选一个
     return siteId !== null ? `/sites/${siteId}/${m.key}` : '/sites';
   };
@@ -50,7 +51,7 @@ export function AppShell({ active, siteId, children }: AppShellProps): React.JSX
           <span className="nav__group-label">{collapsed ? '—' : '模块'}</span>
           {MODULES.map((m) => {
             const isActive = m.key === active;
-            const disabled = m.milestone !== 'M0';
+            const disabled = !m.ready;
             return (
               <button
                 key={m.key}
@@ -99,7 +100,7 @@ export function AppShell({ active, siteId, children }: AppShellProps): React.JSX
         <span aria-hidden="true">·</span>
         <span>契约 v{health?.schemaVersion ?? '—'}</span>
         <span aria-hidden="true">·</span>
-        <span>M0 骨架（站点层可用；采集 / 结构 / 导出按里程碑开放）</span>
+        <span>M1 进行中（站点 / 采集 / 结构可用；规则 / 数据 / 导出按里程碑开放）</span>
         <span className="nav__spacer" />
         <span>数据仅存本机 data/</span>
       </footer>

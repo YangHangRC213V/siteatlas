@@ -73,6 +73,13 @@ export async function registerWsRoutes(app: FastifyInstance, broadcaster: CrawlB
     const s = socket as unknown as SocketLike;
     broadcaster.subscribe(siteId, s);
     const hello: CrawlSocketMessage = { type: 'hello', siteId, schemaVersion: SCHEMA_VERSION };
-    if (s.readyState === OPEN) s.send(JSON.stringify(hello));
+    // 客户端可能还没完成握手（readyState=CONNECTING），握手完成后再发，避免 hello 丢帧
+    if (s.readyState === OPEN) {
+      s.send(JSON.stringify(hello));
+    } else {
+      (s as unknown as { on(event: 'open', handler: () => void): void }).on('open', () => {
+        if (s.readyState === OPEN) s.send(JSON.stringify(hello));
+      });
+    }
   });
 }

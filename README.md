@@ -6,10 +6,23 @@
 - `docs/crawler-tool-dev-spec.md`（开发规格书 v1.0）—— 施工图
 - `docs/DECISIONS.md`（实现决策记录：规格未覆盖处的取舍与理由）
 
-## 当前状态：M0 骨架（dev-spec §7）
+## 当前状态：M1 自动采集（dev-spec §7）
 
-已完成：仓库结构、SQLite 迁移、URL 规范化与身份、`/api/sites` 五个接口、站点卡片视图与详情占位页。
-**未实现**（按里程碑推进）：M1 自动采集、M2 树视图、M3 手动采集、M4 导出与开放 API。
+| 里程碑 | 状态 | 内容 |
+|---|---|---|
+| M0 骨架 | ✅ | 仓库结构、SQLite 迁移、URL 规范化与身份、`/api/sites` 五接口、站点卡片视图 |
+| M1 自动采集 | ✅ | 抓取器（静态 + JS 回落）、持久化队列、三层去重、全部护栏、实时进度、懒加载树视图 |
+| M2 树视图 | ⏳ | 拖拽重挂 / 修正层 / 撤销重做 / 虚拟滚动库 / 子树软删 |
+| M3 手动采集 | ⏳ | CDP 画面串流 + 输入回传 + 点击捕获 + 回根识别 |
+| M4 导出与开放 | ⏳ | JSON/JSONL/CSV/SQLite/Mermaid + manifest + 只读 API |
+
+M1 已实现的关键机制（详见 `docs/DECISIONS.md`）：
+
+- **三层去重**：`identity_key` 规范化指纹（UNIQUE 约束）→ 正文指纹 `content_hash` → 已抓节点直连复用；
+- **护栏**：深度/页数硬上限、同一 URL 访问上限（`access_counts`）、路径前缀 Trie 剪枝、分页序列上限、robots.txt 遵守；
+- **礼貌**：默认 1s/请求 + 抖动、并发 5、按域并发 2、UA 可配；
+- **可控**：暂停/继续/停止，队列与访问计数全部落库，进程重启后 `running → paused` 复位并可续跑；
+- **进度**：WS `/ws/sites/:id` 推送（400ms 节流），断线自动降级为 1.5s 轮询。
 
 ## 环境要求
 
@@ -47,28 +60,36 @@ npm run dev          # server 用 tsx watch（:8787），web 用 vite（:5173，
 ## 校验
 
 ```bash
-npm test             # node --test：URL 规范化/范围、迁移与 DDL、/api/sites 全流程
+npm test             # node --test：URL 规范化/范围、迁移与 DDL、/api/sites、采集内核与接口、WS
 npm run typecheck    # shared + server + web 三处 tsc --noEmit
-node scripts/e2e-m0-screenshot.mjs   # 浏览器端到端 + 截图到 docs/screenshots/
+
+node scripts/demo-site.mjs 8899      # 起本地演示站（多级/多父/变体/404/robots/素材/SPA/分页）
+node scripts/e2e-m0-screenshot.mjs   # M0 端到端 + 截图
+node scripts/e2e-m1-crawl.mjs        # M1 端到端：建站→订阅 WS→采集→树→自检→截图（14 项断言）
 ```
 
 ## 目录结构（dev-spec §3）
 
 ```
 server/src/
-  core/url/       normalize.ts identity.ts scope.ts        # M0 已实现
-  core/fetch/     probe.ts                                 # M0 只做建站探测；http-fetcher/pool/robots 属 M1
-  core/extract/   content.ts                               # display_label 推导（links/fingerprint 属 M1）
-  core/store/     db.ts migrations/ repos/*.ts ids.ts paths.ts
+  core/url/       normalize.ts identity.ts scope.ts
+  core/fetch/     probe.ts http-fetcher.ts browser-fetcher.ts pool.ts robots.ts
+  core/crawl/     scheduler.ts frontier.ts politeness.ts retry.ts pagination.ts prefix.ts control.ts service.ts
+  core/extract/   links.ts content.ts
+  core/store/     db.ts migrations/ repos/{sites,nodes,edges,crawl}.ts ids.ts paths.ts
   core/sites/     service.ts                               # 站点用例（建站校验编排）
-  api/            server.ts routes/sites.ts errors.ts      # ws.ts / open-api.ts 属 M3/M4
+  api/            server.ts errors.ts ws.ts routes/{sites,crawl,tree}.ts   # open-api.ts 属 M4
+  tests/          fixture-site.ts                          # 本地 fixture 站点
+  manual/         （M3）
 web/src/
-  modules/sites/  SitesPage  SiteDetailPage  SiteCard  CreateSiteForm  store  api  types
+  modules/sites/  SitesPage  SiteDetailPage  SiteSubPage  SiteCard  CreateSiteForm  store  api  types
+  modules/crawl/  CrawlPage  store  api  crawl.css           # 采集控制台（M1）
+  modules/tree/   TreePage  store  api  tree.css             # 懒加载树视图（M1 起）
   components/     AppShell.tsx
   router/         modules.ts（模块名=路由名=目录名）  useRoute.ts
   styles/         tokens.css（§5 视觉规范落地）  base.css
 shared/src/       schema.ts                                # 类型契约 v1.0
-scripts/          e2e-m0-screenshot.mjs
+scripts/          demo-site.mjs  e2e-m0-screenshot.mjs  e2e-m1-crawl.mjs
 ```
 
 约束：`web/` 不直接读数据库，只走 API；`core/` 不依赖 `api/`。
