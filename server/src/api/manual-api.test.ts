@@ -16,6 +16,7 @@ import { clearRobotsCache } from '../core/fetch/robots.ts';
 import { startFakeSite, type FakeSite } from '../tests/fixture-site.ts';
 import { FakePageSession } from '../tests/fake-browser.ts';
 import type { ManualService } from '../core/manual/service.ts';
+import type { PageSessionHandlers } from '../core/fetch/session.ts';
 
 interface Harness {
   app: FastifyInstance;
@@ -44,7 +45,7 @@ async function makeHarness(): Promise<Harness> {
   Object.defineProperty(service, 'deps', {
     value: {
       ...(manual.deps as Record<string, unknown>),
-      createPageSession: async (options: { handlers: Parameters<typeof FakePageSession.prototype.constructor>[0] }) => {
+      createPageSession: async (options: { handlers?: PageSessionHandlers }) => {
         const page = new FakePageSession({
           id: 'fake-1',
           ...(options.handlers !== undefined ? { handlers: options.handlers } : {}),
