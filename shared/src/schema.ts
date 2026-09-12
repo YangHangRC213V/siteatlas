@@ -1,0 +1,208 @@
+/**
+ * SiteAtlas 类型契约 v1.0
+ *
+ * 前后端共用（dev-spec §3 `shared/schema.ts`）。字段命名与 dev-spec §4 数据表列名
+ * **逐字保持一致**，避免「数据库叫 A、接口叫 B」的二次映射与漂移。
+ *
+ * 破坏性变更必须提升 SCHEMA_VERSION 并附迁移说明（requirements §6 可扩展）。
+ */
+
+/** 契约版本（导出 manifest 里同样使用，dev-spec §6.7） */
+export const SCHEMA_VERSION = '1.0';
+
+/** 采集范围策略（dev-spec §4 sites.scope） */
+export const SITE_SCOPES = ['same_domain', 'same_site', 'allowlist', 'all'] as const;
+export type SiteScope = (typeof SITE_SCOPES)[number];
+
+/** 节点状态（dev-spec §4 nodes.status） */
+export const NODE_STATUSES = [
+  'queued',
+  'crawling',
+  'ok',
+  'error',
+  'skipped',
+  'blocked',
+  'need_human',
+] as const;
+export type NodeStatus = (typeof NODE_STATUSES)[number];
+
+/** 修正层字段（dev-spec §4 node_overrides.field） */
+export const OVERRIDE_FIELDS = ['parent', 'url', 'alias', 'title', 'deleted', 'locked'] as const;
+export type OverrideField = (typeof OVERRIDE_FIELDS)[number];
+
+/** 边来源（dev-spec §4 edges.source） */
+export const EDGE_SOURCES = ['auto', 'manual', 'sitemap', 'redirect'] as const;
+export type EdgeSource = (typeof EDGE_SOURCES)[number];
+
+/** 素材种类（dev-spec §4 materials.kind） */
+export const MATERIAL_KINDS = ['body', 'html', 'screenshot', 'attachment'] as const;
+export type MaterialKind = (typeof MATERIAL_KINDS)[number];
+
+/** URL 规范化开关（dev-spec §6.1） */
+export interface NormalizeOptions {
+  /** 去 `www.`（可配），默认 true */
+  dropWww?: boolean;
+  /** `http → https` 归一，默认 false（端口/协议语义可能不同，默认不动） */
+  forceHttps?: boolean;
+  /** 额外剔除的 query 参数名（大小写不敏感），叠加在内置黑名单之上 */
+  trackingBlacklist?: readonly string[];
+}
+
+/** 规范化结果：`url` 保留含 fragment 的完整绝对地址，`identityKey` 去 fragment */
+export interface NormalizedUrl {
+  /** 完整绝对 URL（含 fragment），入 `nodes.url` */
+  url: string;
+  /** 规范化指纹（不含 fragment），入 `nodes.identity_key` */
+  identityKey: string;
+  origin: string;
+  host: string;
+  /** 规范化后的 host（小写、去 www、含非默认端口） */
+  normalizedHost: string;
+  protocol: string;
+  /** 显式或补齐的端口，无端口为 null */
+  port: string | null;
+  pathname: string;
+  /** 排序并剔除跟踪参数后的 query 串（不含 `?`） */
+  search: string;
+  /** 去 `#` 的 fragment，无则为 null */
+  fragment: string | null;
+  scope: 'http' | 'https';
+}
+
+/** 建站请求（POST /api/sites） */
+export interface CreateSiteRequest {
+  url: string;
+  scope?: SiteScope;
+  name?: string;
+  /** 跳过可达性探测（离网/测试用）；跳过时根节点 status 记 queued */
+  skipProbe?: boolean;
+  normalize?: NormalizeOptions;
+}
+
+/** PATCH /api/sites/:id 请求体，字段全部可选 */
+export interface UpdateSiteRequest {
+  name?: string;
+  scope?: SiteScope;
+  allowlist?: string[];
+  archived?: boolean;
+  note?: string | null;
+}
+
+/** 站点记录（对应 sites 表列名） */
+export interface SiteRecord {
+  id: string;
+  name: string;
+  root_url: string;
+  root_host: string;
+  scope: SiteScope;
+  allowlist_json: string;
+  created_at: number;
+  updated_at: number;
+  archived: number;
+  note: string | null;
+}
+
+/** 节点记录（对应 nodes 表列名） */
+export interface NodeRecord {
+  id: string;
+  site_id: string;
+  identity_key: string;
+  url: string;
+  alias: string | null;
+  display_label: string | null;
+  title: string | null;
+  http_status: number | null;
+  content_type: string | null;
+  depth: number;
+  auto_parent_id: string | null;
+  status: NodeStatus;
+  content_hash: string | null;
+  in_link_count: number;
+  out_link_count: number;
+  is_deleted: number;
+  first_seen_at: number;
+  last_fetch_at: number | null;
+}
+
+/** 卡片视图需要的聚合统计（GET /api/sites） */
+export interface SiteCardStats {
+  /** 未软删节点数 */
+  nodeCount: number;
+  /** 根节点 status */
+  rootStatus: NodeStatus | null;
+  /** 已抓取（status='ok'）节点数，M1 起有实际意义 */
+  okCount: number;
+  /** 失败节点数 */
+  errorCount: number;
+  /** 最大深度 */
+  maxDepth: number;
+  /** 最近抓取时间 */
+  lastFetchAt: number | null;
+}
+
+export interface SiteCard {
+  site: SiteRecord;
+  stats: SiteCardStats;
+}
+
+/** 探测结论（URL 校验） */
+export interface UrlProbeResult {
+  reachable: boolean;
+  isHtml: boolean;
+  status: number | null;
+  contentType: string | null;
+  finalUrl: string | null;
+  redirectChain: string[];
+  error: string | null;
+}
+
+/** 建站响应 */
+export interface CreateSiteResponse {
+  site: SiteRecord;
+  root: NodeRecord;
+  probe: UrlProbeResult;
+}
+
+export interface SiteDetailResponse {
+  site: SiteRecord;
+  stats: SiteCardStats;
+  root: NodeRecord | null;
+}
+
+export interface ListSitesResponse {
+  sites: SiteCard[];
+}
+
+export interface DeleteSiteResponse {
+  site: SiteRecord;
+  deleted: true;
+  /** 软删影响的节点数 */
+  affectedNodes: number;
+}
+
+/** 统一 API 错误体 */
+export interface ApiError {
+  error: {
+    code: string;
+    message: string;
+    detail?: unknown;
+  };
+}
+
+/** 边记录（M1+ 使用，M0 仅建表） */
+export interface EdgeRecord {
+  id: number;
+  site_id: string;
+  from_id: string;
+  to_id: string;
+  anchor_text: string | null;
+  selector: string | null;
+  dom_path: string | null;
+  rel: string | null;
+  target: string | null;
+  is_nofollow: number;
+  fragment: string | null;
+  source: EdgeSource;
+  order_in_page: number | null;
+  created_at: number;
+}

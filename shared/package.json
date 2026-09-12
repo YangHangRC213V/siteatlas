@@ -1,0 +1,20 @@
+{
+  "name": "@siteatlas/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "前后端共用的类型契约（版本化）",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

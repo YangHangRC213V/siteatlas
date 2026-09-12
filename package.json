@@ -1,0 +1,22 @@
+{
+  "name": "siteatlas",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "SiteAtlas 站点图谱采集器 —— 本地 Web 服务形态",
+  "workspaces": [
+    "shared",
+    "server",
+    "web"
+  ],
+  "engines": {
+    "node": ">=22.6.0"
+  },
+  "scripts": {
+    "build": "npm run build -w @siteatlas/shared && npm run build -w @siteatlas/web",
+    "start": "npm run build && npm run start -w @siteatlas/server",
+    "dev": "npm run dev -w @siteatlas/server",
+    "test": "node --test \"server/src/**/*.test.ts\"",
+    "typecheck": "npm run typecheck -w @siteatlas/shared && npm run typecheck -w @siteatlas/server && npm run typecheck -w @siteatlas/web"
+  }
+}
