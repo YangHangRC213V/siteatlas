@@ -18,5 +18,10 @@
     "dev": "npm run dev --workspaces --if-present",
     "test": "node --test \"server/src/**/*.test.ts\"",
     "typecheck": "npm run typecheck -w @siteatlas/shared && npm run typecheck -w @siteatlas/server && npm run typecheck -w @siteatlas/web"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/YangHangRC213V/siteatlas.git"
   }
 }
