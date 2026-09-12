@@ -6,7 +6,7 @@
 - `docs/crawler-tool-dev-spec.md`（开发规格书 v1.0）—— 施工图
 - `docs/DECISIONS.md`（实现决策记录：规格未覆盖处的取舍与理由）
 
-## 当前状态：M4 导出与开放（dev-spec §7）
+## 当前状态：M0–M4 全部交付 + 设置模块
 
 | 里程碑 | 状态 | 内容 |
 |---|---|---|
@@ -15,6 +15,7 @@
 | M2 树视图 | ✅ | 虚拟滚动、懒加载、属性面板、隐藏地址、软删、撤销重做、拖拽重挂、回收站 |
 | M3 手动采集 | ✅ | CDP 画面串流 + 输入回传 + 点击捕获 + 回根识别 + 展开一层（验收 25 项断言全过） |
 | M4 导出与开放 | ✅ | JSON/JSONL/CSV/SQLite/Mermaid 导出 + manifest + 对外只读 API（验收 28 项，含独立第三方脚本） |
+| 设置模块 | ✅ | 全局默认（礼貌与合规 / 采集默认值 / 素材归档 / 外观）+ 导出预设管理（验收 41 项合并跑） |
 
 
 M1 已实现的关键机制（详见 `docs/DECISIONS.md`）：
@@ -24,6 +25,14 @@ M1 已实现的关键机制（详见 `docs/DECISIONS.md`）：
 - **礼貌**：默认 1s/请求 + 抖动、并发 5、按域并发 2、UA 可配；
 - **可控**：暂停/继续/停止，队列与访问计数全部落库，进程重启后 `running → paused` 复位并可续跑；
 - **进度**：WS `/ws/sites/:id` 推送（400ms 节流），断线自动降级为 1.5s 轮询。
+
+设置模块（导航「设置」）：
+
+- **全局默认**：并发/单域并发/请求间隔/抖动/robots/UA、深度与页数护栏、渲染模式、超时与重试、前缀剪枝与分页上限、素材落盘开关、外观（深色/动效）—— 表单由 `SETTING_FIELDS` 一处定义生成（界面不重复写默认值）；
+- **默认值与护栏分离**：设置只覆盖标记 `inPreset` 的字段，**护栏（maxPages/剪枝阈值等）仍取 §6.3 内置默认**，不会被设置悄悄放宽；
+- **即时生效**：改完保存，下一次采集任务的预设即采用新默认（验收脚本里有断言）；
+- **导出预设**（requirements §4.6）：保存常用的格式/范围组合，导出页一键复用，可设默认（唯一）；
+- **真源单点**：设置在 §4 的 `settings(k,v)` 表，值是 JSON（避免 `"false"` 被读成真）；非法值整批拒绝、不写库（不允许半套设置生效）。
 
 M4 已实现的关键机制：
 
@@ -97,7 +106,7 @@ npm run dev          # server 用 tsx watch（:8787），web 用 vite（:5173，
 ## 校验
 
 ```bash
-npm test             # node --test：URL 规范化/范围、迁移与 DDL、/api/sites、采集内核与接口、WS、手动会话、导出与只读 API（109 项）
+npm test             # node --test：URL 规范化/范围、迁移与 DDL、/api/sites、采集内核与接口、WS、手动会话、导出与只读 API、设置与预设（116 项）
 npm run typecheck    # shared + server + web 三处 tsc --noEmit
 
 node scripts/demo-site.mjs 8899      # 起本地演示站（多级/多父/变体/404/robots/素材/SPA/分页）
@@ -106,7 +115,7 @@ node scripts/e2e-m0-screenshot.mjs   # M0 端到端 + 截图
 node scripts/e2e-m1-crawl.mjs        # M1 端到端：建站→订阅 WS→采集→树→自检→截图（14 项断言）
 node scripts/e2e-m2-tree.mjs         # M2 端到端：拖拽重挂/撤销重做/批量/属性/回收站/12k 节点压测（18 项断言）
 node scripts/e2e-m3-manual.mjs       # M3 端到端：真实 Chromium 手动点选建边/回根不重复建节点/展开一层/待确认确认与丢弃（25 项断言）
-node scripts/e2e-m4-export.mjs       # M4 端到端：五种格式导出 + manifest + 只读 API + 独立第三方脚本消费（28 项断言）
+node scripts/e2e-m4-export.mjs       # M4 端到端：五种格式导出 + manifest + 只读 API + 独立第三方脚本消费 + 设置/预设（41 项断言）
 ```
 
 ## 目录结构（dev-spec §3）
@@ -121,9 +130,10 @@ server/src/
   core/override/  overrides.ts                             # 修正层用例（重挂/改地址/软删/撤销重做/回收站）
   core/export/    dataset.ts writers.ts service.ts         # 导出：数据集投影 / 各格式写出器 / 编排与 manifest（M4）
   core/materials/ archive.ts hash.ts                       # 素材归档：raw 原件 + parsed 解析结果（M4）
+  core/settings/  service.ts                               # 全局设置与导出预设（设置模块）
   core/sites/     service.ts                               # 站点用例（建站校验编排）
   core/manual/    session.ts capture.ts screencast.ts service.ts   # 手动会话：配对/待确认/串流节流
-  api/            server.ts errors.ts ws.ts ws-manual.ts routes/{sites,crawl,tree,manual,export}.ts open-api.ts
+  api/            server.ts errors.ts ws.ts ws-manual.ts routes/{sites,crawl,tree,manual,export,settings}.ts open-api.ts
   tests/          fixture-site.ts  fake-browser.ts          # 本地 fixture 站点 + 可注入的假页面会话
 web/src/
   modules/sites/  SitesPage  SiteDetailPage  SiteSubPage  SiteCard  CreateSiteForm  store  api  types
@@ -131,6 +141,7 @@ web/src/
   modules/tree/   TreePage  store  api  tree.css             # 虚拟滚动树视图 + 修正层交互（M2）
   modules/manual/ ManualPage  RemoteBrowserView  store  api  manual.css   # 手动采集控制台（M3）
   modules/export/ ExportPage  store  api  export.css        # 导出控制台 + manifest 展示（M4）
+  modules/settings/ SettingsPage  store  api  theme.ts  settings.css   # 全局设置与预设（表单由契约生成）
   components/     AppShell.tsx
   router/         modules.ts（模块名=路由名=目录名）  useRoute.ts
   styles/         tokens.css（§5 视觉规范落地）  base.css

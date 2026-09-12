@@ -19,6 +19,7 @@ import { registerCrawlRoutes } from './routes/crawl.ts';
 import { registerTreeRoutes } from './routes/tree.ts';
 import { registerManualRoutes } from './routes/manual.ts';
 import { registerExportRoutes } from './routes/export.ts';
+import { registerSettingsRoutes } from './routes/settings.ts';
 import { registerOpenApiRoutes } from './routes/open-api.ts';
 import { CrawlBroadcaster, registerWsRoutes } from './ws.ts';
 import { registerManualWsRoutes } from './ws-manual.ts';
@@ -35,6 +36,7 @@ import { SitesRepo } from '../core/store/repos/sites.ts';
 import { MaterialsRepo } from '../core/store/repos/materials.ts';
 import { ExportService } from '../core/export/service.ts';
 import { MaterialsArchiver } from '../core/materials/archive.ts';
+import { SettingsService } from '../core/settings/service.ts';
 import { findProjectRoot } from '../core/store/paths.ts';
 import { SitesService } from '../core/sites/service.ts';
 
@@ -58,6 +60,7 @@ export interface BuiltServer {
   overridesService: OverridesService;
   manualService: ManualService;
   exportService: ExportService;
+  settingsService: SettingsService;
   materials: MaterialsRepo;
   broadcaster: CrawlBroadcaster;
   pool: BrowserPool;
@@ -87,7 +90,19 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   const broadcaster = new CrawlBroadcaster();
   const materials = new MaterialsRepo(options.db);
   const archiver = new MaterialsArchiver({ rootDir, materials });
-  const crawlService = new CrawlService({ db: options.db, sites, nodes, edges, crawl, pool, archiver });
+  const settingsService = new SettingsService({ db: options.db });
+  const crawlService = new CrawlService({
+    db: options.db,
+    sites,
+    nodes,
+    edges,
+    crawl,
+    pool,
+    archiver,
+    // 全局设置 → 采集默认值（设置页改了立即生效）
+    defaultPreset: () => settingsService.crawlFallback(),
+    archiveMaterials: () => settingsService.archiveMaterials(),
+  });
   const manualService = new ManualService({ db: options.db, sites, nodes, edges, pool });
   const exportService = new ExportService({ db: options.db, rootDir });
 
@@ -112,6 +127,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     await registerTreeRoutes(instance, { sites, nodes, edges, crawl, overrides, materials });
     await registerManualRoutes(instance, manualService);
     await registerExportRoutes(instance, { exports: exportService, materials });
+    await registerSettingsRoutes(instance, settingsService);
     await registerOpenApiRoutes(instance, { exports: exportService });
   });
 
@@ -153,6 +169,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     overridesService: overrides,
     manualService,
     exportService,
+    settingsService,
     materials,
     broadcaster,
     pool,

@@ -9,7 +9,8 @@ import { navigate } from '../../router/useRoute.ts';
 import { sitesApi } from '../sites/api.ts';
 import { FORMAT_LABELS, SCOPE_LABELS } from './api.ts';
 import { useExportStore } from './store.ts';
-import { EXPORT_FORMATS, type ExportFormat, type ExportScope } from '@siteatlas/shared';
+import { settingsApi } from '../settings/api.ts';
+import { EXPORT_FORMATS, type ExportFormat, type ExportPreset, type ExportScope } from '@siteatlas/shared';
 import './export.css';
 
 export interface ExportPageProps {
@@ -33,6 +34,10 @@ export function ExportPage({ siteId }: ExportPageProps): React.JSX.Element {
   const [scope, setScope] = useState<ExportScope>('site');
   const [nodeId, setNodeId] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
+  // 导出预设（§4.6「保存常用格式/字段/过滤条件，一键复用」）：在设置页管理，这里选用
+  const [presets, setPresets] = useState<ExportPreset[]>([]);
+  const [presetId, setPresetId] = useState('');
+  const [presetName, setPresetName] = useState('');
 
   const records = useExportStore((s) => s.exports);
   const materials = useExportStore((s) => s.materials);
@@ -52,6 +57,20 @@ export function ExportPage({ siteId }: ExportPageProps): React.JSX.Element {
     void bind(siteId);
     return () => unbind();
   }, [bind, unbind, siteId]);
+
+  const loadPresets = (): void => {
+    settingsApi
+      .listExportPresets()
+      .then((payload) => {
+        setPresets(payload.presets);
+        setPresetId((current) => (current.length > 0 ? current : (payload.presets.find((p) => p.isDefault)?.id ?? '')));
+      })
+      .catch(() => setPresets([]));
+  };
+
+  useEffect(() => {
+    loadPresets();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,8 +145,39 @@ export function ExportPage({ siteId }: ExportPageProps): React.JSX.Element {
 
           <div className="export-form">
             <label className="field">
+              <span>导出预设（可选）</span>
+              <select
+                className="input"
+                data-testid="export-preset"
+                value={presetId}
+                onChange={(e) => {
+                  const id = e.target.value;
+                  setPresetId(id);
+                  const preset = presets.find((p) => p.id === id);
+                  if (preset === undefined) return;
+                  setFormat(preset.payload.format);
+                  setScope(preset.payload.scope);
+                }}
+              >
+                <option value="">（不使用预设）</option>
+                {presets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name} —— {preset.payload.format} / {preset.payload.scope}
+                    {preset.payload.includeDeleted ? ' / 含软删' : ''}
+                  </option>
+                ))}
+              </select>
+              <span className="field__hint">预设可在「设置」页管理与删除</span>
+            </label>
+
+            <label className="field">
               <span>格式</span>
-              <select className="input" value={format} onChange={(e) => setFormat(e.target.value as ExportFormat)}>
+              <select
+                className="input"
+                data-testid="export-format"
+                value={format}
+                onChange={(e) => setFormat(e.target.value as ExportFormat)}
+              >
                 {EXPORT_FORMATS.map((f) => (
                   <option key={f} value={f}>
                     {FORMAT_LABELS[f].label} —— {FORMAT_LABELS[f].hint}
@@ -138,7 +188,7 @@ export function ExportPage({ siteId }: ExportPageProps): React.JSX.Element {
 
             <label className="field">
               <span>范围</span>
-              <select className="input" value={scope} onChange={(e) => setScope(e.target.value as ExportScope)}>
+              <select className="input" data-testid="export-scope" value={scope} onChange={(e) => setScope(e.target.value as ExportScope)}>
                 {(Object.keys(SCOPE_LABELS) as ExportScope[]).map((s) => (
                   <option key={s} value={s}>
                     {SCOPE_LABELS[s]}
@@ -159,14 +209,42 @@ export function ExportPage({ siteId }: ExportPageProps): React.JSX.Element {
               </label>
             )}
 
-            <button
-              type="button"
-              className="btn btn--primary"
-              disabled={busy || (scope === 'subtree' && nodeId.trim().length === 0)}
-              onClick={() => void run({ format, scope, nodeId })}
-            >
-              {busy ? '导出中…' : '开始导出'}
-            </button>
+            <div className="export-form__actions">
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={busy || (scope === 'subtree' && nodeId.trim().length === 0)}
+                onClick={() => void run({ format, scope, nodeId })}
+              >
+                {busy ? '导出中…' : '开始导出'}
+              </button>
+              <input
+                className="input export-form__preset-name"
+                placeholder="预设名（保存当前格式/范围）"
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+              />
+              <button
+                type="button"
+                className="btn"
+                disabled={busy || presetName.trim().length === 0}
+                onClick={() => {
+                  void settingsApi
+                    .createExportPreset({
+                      name: presetName.trim(),
+                      payload: { format, scope, includeDeleted: scope === 'all' },
+                    })
+                    .then(() => {
+                      setPresetName('');
+                      loadPresets();
+                    })
+                    .catch(() => undefined);
+                }}
+                title="把当前格式与范围保存为预设，下次一键复用"
+              >
+                保存为预设
+              </button>
+            </div>
           </div>
 
           <header className="crawl-panel__head">

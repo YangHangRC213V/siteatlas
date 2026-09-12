@@ -47,6 +47,13 @@ export interface CrawlServiceDeps {
    * 未注入时采集照常，只是不留素材档（单元测试多数不需要）。
    */
   archiver?: MaterialsArchiver;
+  /**
+   * 默认抓取预设的来源（全局设置）。调用方没显式传值时就落在这里，
+   * 这样「设置里改了默认限速/并发」对下一次采集立即生效（§4.7）。
+   */
+  defaultPreset?: () => CrawlPreset;
+  /** 是否归档解析结果（设置项 archiveMaterials，默认开） */
+  archiveMaterials?: () => boolean;
 }
 
 interface ActiveRun {
@@ -182,7 +189,7 @@ export class CrawlService {
     const root = this.deps.nodes.root(siteId);
     if (root === null) throw new CrawlError('ROOT_NODE_MISSING', '站点缺少根节点，无法采集', 409);
 
-    const preset = resolvePreset(presetInput, site.scope);
+    const preset = resolvePreset(presetInput, site.scope, this.deps.defaultPreset?.() ?? DEFAULT_CRAWL_PRESET);
     // 站点范围以站点记录为准（除非显式传入 preset.scope）
     if (presetInput?.scope === undefined) preset.scope = site.scope;
     if (preset.scope === 'allowlist' && preset.allowlist.length === 0) {
@@ -312,10 +319,13 @@ export class CrawlService {
     const archiver = this.deps.archiver;
     const passthrough: CrawlListener = { ...(listener ?? {}) };
     if (archiver === undefined) return passthrough;
+    // 解析结果档案可以关（设置项 archiveMaterials）：关掉时不写 parsed/
+    const archiveParsed = this.deps.archiveMaterials?.() ?? true;
     const original = listener?.onPageFetched;
     return {
       ...passthrough,
       onPageFetched: (page) => {
+        if (!archiveParsed) return original?.(page);
         archiver.archivePage({
           siteId: page.siteId,
           nodeId: page.nodeId,

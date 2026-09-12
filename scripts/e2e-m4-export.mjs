@@ -8,6 +8,9 @@
  *      只给它 manifest 地址，让它自己把全部数据读出来并逐文件校验 sha256 ——
  *      这就是「第三方脚本」的验收证据。
  *
+ * 同时覆盖「设置」模块（全局默认 + 导出预设）：设置改了要能立刻影响下一次采集，
+ * 预设要在导出页能一键复用 —— 这两条是「设置页不是摆设」的验收依据。
+ *
  * 用法：node scripts/e2e-m4-export.mjs [baseUrl] [demoOrigin]
  */
 import { execFileSync } from 'node:child_process';
@@ -142,6 +145,72 @@ check(
   '采集时归档素材（raw 原件 + parsed 解析结果）',
   materials.materials.some((m) => m.kind === 'html') && materials.materials.some((m) => m.kind === 'body'),
   `${materials.total} 条素材`,
+);
+
+/* ---------------- 1.5) 设置模块（纯 API 部分）：全局默认 + 导出预设 ---------------- */
+// 先把设置恢复默认：上一次验收可能留下了改动，断言必须可复现
+await api('/api/settings/reset', { method: 'POST' });
+const original = (await api('/api/settings')).settings;
+check(
+  '设置接口返回字段元数据与默认值（§4.7 默认并发 5 / 间隔 1000ms）',
+  original.concurrency === 5 && original.minDelayMs === 1000 && original.theme === 'system',
+  `concurrency=${original.concurrency} minDelayMs=${original.minDelayMs} theme=${original.theme}`,
+);
+const fieldsCount = (await api('/api/settings')).fields.length;
+check('设置项元数据齐备（界面表单由它生成）', fieldsCount >= 15, `${fieldsCount} 个设置项`);
+
+const updated = (
+  await api('/api/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ settings: { concurrency: 6, minDelayMs: 1300, theme: 'dark' } }),
+  })
+).settings;
+check(
+  '设置可保存并读回（含外观项）',
+  updated.concurrency === 6 && updated.minDelayMs === 1300 && updated.theme === 'dark',
+  `concurrency=${updated.concurrency} minDelayMs=${updated.minDelayMs} theme=${updated.theme}`,
+);
+
+const badRes = await fetch(`${baseUrl}/api/settings`, {
+  method: 'PUT',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ settings: { concurrency: 999 } }),
+});
+const badBody = await badRes.json();
+check('非法设置被拒绝且不写库', badRes.status === 400 && badBody.error.code === 'INVALID_SETTING', `HTTP ${badRes.status} ${badBody.error.code}`);
+
+// 设置 → 下一次采集的默认值（护栏不能被设置悄悄放宽）
+const probeBody = await api(`/api/sites/${siteId}/crawl`, { method: 'POST', body: JSON.stringify({}) });
+check(
+  '设置立刻影响下一次采集的默认预设（护栏仍取内置默认）',
+  probeBody.preset?.concurrency === 6 && probeBody.preset?.minDelayMs === 1300 && probeBody.preset?.maxPages === 100000 && probeBody.preset?.prefixPruneThreshold === 20,
+  `concurrency=${probeBody.preset?.concurrency} minDelayMs=${probeBody.preset?.minDelayMs} maxPages=${probeBody.preset?.maxPages}`,
+);
+await fetch(`${baseUrl}/api/sites/${siteId}/crawl/stop`, { method: 'POST' }).catch(() => undefined);
+const resetBody = (await api('/api/settings/reset', { method: 'POST' })).settings;
+check(
+  '恢复默认把所有设置还原',
+  resetBody.concurrency === original.concurrency && resetBody.theme === original.theme,
+  `concurrency=${resetBody.concurrency} theme=${resetBody.theme}`,
+);
+
+// 导出预设（§4.6 一键复用）
+const presetRes = await fetch(`${baseUrl}/api/presets/export`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ name: `验收预设 ${Date.now() % 100000}`, payload: { format: 'csv', scope: 'site', includeDeleted: false }, isDefault: true }),
+});
+const presetBody = await presetRes.json();
+check(
+  '导出预设可保存（§4.6 一键复用）',
+  presetRes.status === 201 && typeof presetBody.preset?.id === 'string' && presetBody.preset.payload.format === 'csv',
+  presetBody.preset?.name ?? '保存失败',
+);
+const presetList = await api('/api/presets/export');
+check(
+  '预设列表里恰好一个默认预设',
+  presetList.presets.filter((p) => p.isDefault).length === 1 && presetList.presets[0]?.id === presetBody.preset.id,
+  `${presetList.presets.length} 个预设`,
 );
 
 /* ---------------- 1) 五种格式各导一遍 ---------------- */
@@ -320,8 +389,8 @@ await page.goto(`${baseUrl}/sites/${siteId}/export`, { waitUntil: 'networkidle' 
 await page.waitForSelector('.export-page');
 check('导出页可打开且列出历史导出', (await page.locator('.export-list__item').count()) >= 5, `${await page.locator('.export-list__item').count()} 条`);
 
-// 从界面新建一次导出（CSV）
-await page.selectOption('.export-form select', 'csv');
+// 从界面新建一次导出（CSV）—— 用 data-testid 定位，避免与「导出预设」下拉混淆
+await page.selectOption('[data-testid="export-format"]', 'csv');
 await page.locator('.export-form .btn--primary').click();
 await page.waitForFunction(() => document.querySelectorAll('.export-list__item').length >= 6, null, { timeout: 15000 });
 await page.waitForSelector('.export-detail .table');
@@ -331,6 +400,38 @@ await shot('m4-01-export-page.png');
 
 const openLink = await page.locator('.export-endpoints a').first().getAttribute('href');
 check('界面上给出只读 API 地址', openLink !== null && openLink.startsWith('/open/v1/'), openLink ?? '未找到');
+
+
+/* ---------------- 5.5) 设置页界面：改了要能落库、外观要立即生效 ---------------- */
+await page.goto(`${baseUrl}/settings`, { waitUntil: 'networkidle' });
+await page.waitForSelector('.settings-page');
+const groupTitles = await page.locator('.settings-group__title').allInnerTexts();
+const fieldCount = await page.locator('.settings-field').count();
+check('设置页可打开且按分组渲染全部设置项', groupTitles.length >= 4 && fieldCount >= 15, `${groupTitles.length} 组 / ${fieldCount} 项`);
+check('导航里「设置」已可选（不再是未开放）', (await page.locator('.nav__item[data-disabled="false"]', { hasText: '设置' }).count()) === 1);
+
+await page.locator('.settings-field', { hasText: '总并发' }).locator('input').fill('8');
+await page.locator('.settings-actions .btn--primary').click();
+await page.waitForTimeout(900);
+const afterUiSave = await api('/api/settings');
+check('界面上改设置能落库', afterUiSave.settings.concurrency === 8, `服务端 concurrency=${afterUiSave.settings.concurrency}`);
+
+await page.locator('.settings-field', { hasText: '外观' }).locator('select').selectOption('dark');
+await page.locator('.settings-actions .btn--primary').click();
+await page.waitForTimeout(700);
+const themeAttr = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
+check('外观改深色立即作用到界面（无需刷新）', themeAttr === 'dark', `data-theme=${themeAttr}`);
+await shot('m5-01-settings.png');
+
+await page.goto(`${baseUrl}/sites/${siteId}/export`, { waitUntil: 'networkidle' });
+await page.waitForSelector('.export-page');
+const presetOptions = await page.locator('[data-testid="export-preset"] option').allInnerTexts();
+check('导出页能选到已保存的预设', presetOptions.some((text) => text.startsWith('验收预设')), `${presetOptions.length} 个选项`);
+await shot('m5-02-export-preset.png');
+
+// 收尾：清掉本次设置与预设，避免影响下一轮
+await api('/api/settings/reset', { method: 'POST' });
+await api(`/api/presets/export/${presetBody.preset.id}`, { method: 'DELETE' }).catch(() => undefined);
 
 await browser.close();
 

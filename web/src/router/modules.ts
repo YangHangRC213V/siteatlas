@@ -34,7 +34,7 @@ export const MODULES: ModuleDef[] = [
   { key: 'data', label: '数据', path: '/data', icon: '▤', milestone: 'M4', perSite: true, ready: false, unavailableHint: '「数据」模块（素材库与站点差异对比）尚未开发，尚未排期。' },
   { key: 'rules', label: '规则', path: '/rules', icon: '⚙', milestone: 'M1', perSite: true, ready: false, unavailableHint: '「规则」模块（采集规则、范围与预设管理）尚未开发，尚未排期。' },
   { key: 'export', label: '导出', path: '/export', icon: '⤴', milestone: 'M4', perSite: true, ready: true },
-  { key: 'settings', label: '设置', path: '/settings', icon: '⚒', milestone: 'M1', perSite: false, ready: false, unavailableHint: '「设置」模块（限速/UA/素材开关/外观）尚未开发，尚未排期。' },
+  { key: 'settings', label: '设置', path: '/settings', icon: '⚒', milestone: 'M1', perSite: false, ready: true },
 ];
 
 export const moduleByKey = (key: ModuleKey): ModuleDef => {

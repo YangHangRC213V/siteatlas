@@ -127,3 +127,14 @@
   color: var(--c-text-muted);
   font-weight: 500;
 }
+
+.export-form__actions {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.export-form__preset-name {
+  flex: 1;
+  min-width: 180px;
+}

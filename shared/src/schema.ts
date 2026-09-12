@@ -657,3 +657,92 @@ export interface MaterialRecordApi {
   sha256: string | null;
   created_at: number;
 }
+
+/* ---------------- 设置与预设（requirements §4.7 / §4.6；导航「设置」模块） ---------------- */
+
+/** 设置项类型：界面据此决定用哪种控件 */
+export type SettingKind = 'int' | 'bool' | 'string' | 'enum' | 'stringList';
+
+export interface SettingFieldDef {
+  key: string;
+  group: 'politeness' | 'defaults' | 'materials' | 'appearance';
+  label: string;
+  hint: string;
+  kind: SettingKind;
+  /** 落到 CrawlPreset 的字段名（缺省 = 与 key 同名） */
+  presetKey?: keyof CrawlPreset;
+  default: number | boolean | string | string[];
+  min?: number;
+  max?: number;
+  /** 界面步长与单位 */
+  step?: number;
+  unit?: string;
+  options?: readonly string[];
+  /** 该设置是否对应采集预设（决定「是否参与默认 preset」） */
+  inPreset: boolean;
+}
+
+/**
+ * 全局设置的**唯一真源**：界面表单、服务端校验、抓取默认值都从这张表派生。
+ * 加一个设置项 = 这里加一行；不允许各处各写一遍默认值与范围。
+ */
+export const SETTING_FIELDS: readonly SettingFieldDef[] = [
+  { key: 'concurrency', group: 'politeness', label: '总并发', hint: '同时抓取的页面数上限（§4.7 默认 5）', kind: 'int', default: 5, min: 1, max: 32, inPreset: true },
+  { key: 'perHostConcurrency', group: 'politeness', label: '单域并发', hint: '同一个域名同时抓取的页面数（防压站）', kind: 'int', default: 2, min: 1, max: 16, inPreset: true },
+  { key: 'minDelayMs', group: 'politeness', label: '请求间隔', hint: '同一域名两次请求之间的最小间隔（§4.7 要求 ≥1s 可调）', kind: 'int', default: 1000, min: 0, max: 60000, step: 100, unit: 'ms', inPreset: true },
+  { key: 'jitterMs', group: 'politeness', label: '间隔抖动', hint: '在请求间隔上叠加的随机抖动，避免规律性压站', kind: 'int', default: 400, min: 0, max: 10000, step: 50, unit: 'ms', inPreset: true },
+  { key: 'respectRobots', group: 'politeness', label: '遵守 robots.txt', hint: '关闭后不再读取 robots.txt（请自行确认目标站条款）', kind: 'bool', default: true, inPreset: true },
+  { key: 'userAgent', group: 'politeness', label: 'User-Agent', hint: '默认标识为工具名；改前请确认目标站允许', kind: 'string', default: 'SiteAtlas/0.1 (+local crawler)', inPreset: true },
+
+  { key: 'maxDepth', group: 'defaults', label: '最大深度', hint: '从根算起的最大层数（硬上限）', kind: 'int', default: 5, min: 0, max: 20, inPreset: true },
+  { key: 'maxPages', group: 'defaults', label: '最大页数', hint: '单站抓取页数硬上限', kind: 'int', default: 100000, min: 1, max: 1000000, step: 1000, inPreset: true },
+  { key: 'visitLimit', group: 'defaults', label: '同一 URL 访问上限', hint: '超过后跳过不再请求（循环护栏）', kind: 'int', default: 3, min: 1, max: 100, inPreset: true },
+  { key: 'renderMode', group: 'defaults', label: '渲染模式', hint: 'auto = 静态优先、链接不足时回落 Playwright', kind: 'enum', default: 'auto', options: RENDER_MODES, inPreset: true },
+  { key: 'timeoutMs', group: 'defaults', label: '单请求超时', hint: '单页抓取超时时间', kind: 'int', default: 15000, min: 1000, max: 120000, step: 1000, unit: 'ms', inPreset: true },
+  { key: 'maxRetries', group: 'defaults', label: '失败重试次数', hint: '可重试错误（超时/5xx）的重试上限', kind: 'int', default: 2, min: 0, max: 10, inPreset: true },
+  { key: 'prefixPruneThreshold', group: 'defaults', label: '前缀剪枝阈值', hint: '同一路径前缀连续命中超过该值即剪枝（对付无限目录）', kind: 'int', default: 20, min: 1, max: 10000, inPreset: true },
+  { key: 'paginationPageLimit', group: 'defaults', label: '分页自动页上限', hint: '识别为分页序列时最多抓多少页', kind: 'int', default: 50, min: 1, max: 10000, inPreset: true },
+
+  { key: 'downloadAssets', group: 'materials', label: '留 HTML 原件', hint: '开启后把每页原件写到 data/sites/<id>/raw/（默认只留解析结果，避免大站占满磁盘）', kind: 'bool', default: false, inPreset: true },
+  { key: 'archiveMaterials', group: 'materials', label: '归档解析结果', hint: '把标题/描述/正文摘要/内容指纹写到 parsed/ 并登记 materials 表', kind: 'bool', default: true, inPreset: false },
+
+  { key: 'theme', group: 'appearance', label: '外观', hint: '浅色 / 深色 / 跟随系统', kind: 'enum', default: 'system', options: ['system', 'light', 'dark'], inPreset: false },
+  { key: 'reduceMotion', group: 'appearance', label: '减少动效', hint: '关闭界面过渡动画（requirements §5 动效 ≤200ms 且可关）', kind: 'bool', default: false, inPreset: false },
+];
+
+export type AppSettings = Record<string, number | boolean | string | string[]>;
+
+export interface SettingsResponse {
+  settings: AppSettings;
+  /** 界面用来渲染表单的元数据（标签/范围/默认值/单位） */
+  fields: readonly SettingFieldDef[];
+}
+
+export interface UpdateSettingsRequest {
+  settings: Record<string, number | boolean | string | string[]>;
+}
+
+/** 导出预设（requirements §4.6「保存常用格式/字段/过滤条件，一键复用」；§4 presets 表） */
+export interface ExportPresetPayload {
+  format: ExportFormat;
+  scope: ExportScope;
+  includeDeleted: boolean;
+}
+
+export interface ExportPreset {
+  id: string;
+  name: string;
+  payload: ExportPresetPayload;
+  isDefault: boolean;
+  createdAt: number | null;
+}
+
+export interface ExportPresetsResponse {
+  presets: ExportPreset[];
+}
+
+export interface CreateExportPresetRequest {
+  name: string;
+  payload: ExportPresetPayload;
+  isDefault?: boolean;
+}

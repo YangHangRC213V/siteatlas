@@ -9,7 +9,7 @@
  *   /sites/:id/tree           → 树视图（modules/tree，M1 懒加载树；M2 加修正层）
  *   /sites/:id/export         → 导出（modules/export，M4）
  *   /sites/:id/{data,rules}   → 各模块占位页，标注所属里程碑
- *   /settings                 → 设置占位页
+ *   /settings                 → 设置（modules/settings，全局默认与导出预设）
  */
 import { useEffect } from 'react';
 import { AppShell } from './components/AppShell.tsx';
@@ -22,6 +22,7 @@ import { CrawlPage } from './modules/crawl/CrawlPage.tsx';
 import { TreePage } from './modules/tree/TreePage.tsx';
 import { ManualPage } from './modules/manual/ManualPage.tsx';
 import { ExportPage } from './modules/export/ExportPage.tsx';
+import { SettingsPage } from './modules/settings/SettingsPage.tsx';
 
 export function App(): React.JSX.Element {
   const route = useRoute();
@@ -85,7 +86,7 @@ export function App(): React.JSX.Element {
   if (route.path === '/settings') {
     return (
       <AppShell active="settings" siteId={null}>
-        <SiteSubPage siteId={null} moduleKey="settings" moduleLabel="设置" milestone="M1" />
+        <SettingsPage />
       </AppShell>
     );
   }
