@@ -16,6 +16,7 @@ import { NodesRepo } from '../core/store/repos/nodes.ts';
 import { SitesRepo } from '../core/store/repos/sites.ts';
 import { SitesService } from '../core/sites/service.ts';
 import { SCHEMA_VERSION } from '@siteatlas/shared';
+import { findProjectRoot } from '../core/store/paths.ts';
 
 export interface BuildServerOptions {
   db: DatabaseSync;
@@ -34,17 +35,13 @@ export interface BuiltServer {
 }
 
 export function buildServer(options: BuildServerOptions): BuiltServer {
-  // 本文件位于 <root>/server/src/api/，上溯四级即项目根
-  const rootDir = options.rootDir ?? resolve(import.meta.dirname, '..', '..', '..', '..');
+  // 默认从本文件位置向上找 npm workspaces 根（不依赖调用方 cwd）
+  const rootDir = options.rootDir ?? findProjectRoot(import.meta.dirname);
   const webDistDir = options.webDistDir ?? resolve(rootDir, 'web', 'dist');
   const webDistPresent = existsSync(resolve(webDistDir, 'index.html'));
 
   const app = Fastify({
-    logger:
-      options.logger === false
-        ? false
-        : { level: process.env['SITEATLAS_LOG_LEVEL'] ?? 'info', transport: undefined },
-    disableRequestLogging: false,
+    logger: options.logger === false ? false : { level: process.env['SITEATLAS_LOG_LEVEL'] ?? 'info' },
   });
 
   app.setErrorHandler(errorHandler);

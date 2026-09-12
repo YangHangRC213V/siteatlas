@@ -56,7 +56,13 @@ export interface CreateSiteInput {
 }
 
 export class SitesRepo {
-  constructor(private readonly db: DatabaseSync) {}
+  private readonly db: DatabaseSync;
+
+  // 未用参数属性（constructor(private readonly db)）：Node 原生 TS 剥离不支持该语法，
+  // 而本项目测试用 `node --test` 直跑 .ts，必须保持「可擦除语法」。
+  constructor(db: DatabaseSync) {
+    this.db = db;
+  }
 
   /** 建站（不建根节点，根节点由 NodesRepo 负责，保证调用方在同一事务语义下组合） */
   create(input: CreateSiteInput): SiteRecord {

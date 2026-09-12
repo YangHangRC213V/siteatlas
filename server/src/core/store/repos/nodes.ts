@@ -54,7 +54,12 @@ export interface CreateRootNodeInput {
 }
 
 export class NodesRepo {
-  constructor(private readonly db: DatabaseSync) {}
+  private readonly db: DatabaseSync;
+
+  // 同上：不使用参数属性，保持 Node 原生 TS 剥离可运行
+  constructor(db: DatabaseSync) {
+    this.db = db;
+  }
 
   /** 建根节点：depth=0、auto_parent_id=NULL（requirements §4.1「当前页即根节点」） */
   createRoot(input: CreateRootNodeInput): NodeRecord {
