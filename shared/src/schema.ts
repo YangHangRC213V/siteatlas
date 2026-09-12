@@ -354,6 +354,8 @@ export interface TreeResponse {
   offset: number;
   limit: number;
   nodes: TreeNodeRow[];
+  /** 撤销/重做栈深度（前端按钮禁用态与计数展示） */
+  depths?: { undoDepth: number; redoDepth: number };
 }
 
 /** 修正层记录（dev-spec §4 node_overrides） */
@@ -415,6 +417,7 @@ export interface TrashEntry {
 
 export interface TrashResponse {
   entries: TrashEntry[];
+  depths?: { undoDepth: number; redoDepth: number };
 }
 
 /** 节点详情（GET /api/nodes/:id） */

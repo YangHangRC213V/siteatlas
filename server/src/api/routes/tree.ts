@@ -149,7 +149,11 @@ export async function registerTreeRoutes(app: FastifyInstance, deps: TreeRouteDe
       }
 
       if (request.query.trash === '1') {
-        const body: TrashResponse & { nodes: TreeNodeRow[] } = { entries: overrides.trash(siteId), nodes: [] };
+        const body: TrashResponse & { nodes: TreeNodeRow[] } = {
+          entries: overrides.trash(siteId),
+          nodes: [],
+          depths: overrides.depths(siteId),
+        };
         return body;
       }
 
@@ -158,7 +162,15 @@ export async function registerTreeRoutes(app: FastifyInstance, deps: TreeRouteDe
       const offset = Math.max(0, Number(request.query.offset ?? 0) || 0);
       const limit = Math.min(500, Math.max(1, Number(request.query.limit ?? 100) || 100));
       const page = nodes.childrenPage(siteId, parentId, offset, limit);
-      const body: TreeResponse = { parentId, total: page.total, offset, limit, nodes: page.nodes };
+      const body: TreeResponse = {
+        parentId,
+        total: page.total,
+        offset,
+        limit,
+        nodes: page.nodes,
+        // 撤销/重做栈深度随树接口一起返回，前端不必额外请求就能正确显示按钮态
+        depths: overrides.depths(siteId),
+      };
       return body;
     },
   );
@@ -277,11 +289,8 @@ export async function registerTreeRoutes(app: FastifyInstance, deps: TreeRouteDe
     {
       schema: {
         params: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
-        body: {
-          type: 'object',
-          additionalProperties: false,
-          properties: { ids: { type: 'array', items: { type: 'string' } } },
-        },
+        // 不声明 body schema：单节点软删不带 body，而 Fastify 对「声明了 body schema 但 body 为空」
+        // 的请求会报 INVALID_BODY（踩过这个坑），因此这里在处理器里手动校验 ids。
         response: { 200: { type: 'object', additionalProperties: true } },
       },
     },
@@ -290,15 +299,30 @@ export async function registerTreeRoutes(app: FastifyInstance, deps: TreeRouteDe
       if (anchor === null) {
         throw new SiteServiceError('NODE_NOT_FOUND', `节点不存在：${request.params.id}`, 404);
       }
-      const ids = request.body?.ids !== undefined && request.body.ids.length > 0 ? request.body.ids : [anchor.id];
-      const result = overrides.deleteSubtrees(anchor.site_id, ids);
-      const body: DeleteNodesResponse & { depths: { undoDepth: number; redoDepth: number } } = {
+      const rawBody: unknown = request.body;
+      let ids: unknown;
+      if (rawBody !== null && typeof rawBody === 'object') {
+        ids = (rawBody as { ids?: unknown }).ids;
+      } else if (typeof rawBody === 'string' && rawBody.length > 0) {
+        // 某些中间层会把 JSON 当字符串传进来，这里兜底解析
+        try {
+          ids = (JSON.parse(rawBody) as { ids?: unknown }).ids;
+        } catch {
+          throw new SiteServiceError('INVALID_BODY', '请求体不是合法 JSON', 400);
+        }
+      }
+      if (ids !== undefined && (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string'))) {
+        throw new SiteServiceError('INVALID_BODY', 'ids 必须是字符串数组', 400);
+      }
+      const targets = Array.isArray(ids) && ids.length > 0 ? (ids as string[]) : [anchor.id];
+      const result = overrides.deleteSubtrees(anchor.site_id, targets);
+      const responseBody: DeleteNodesResponse & { depths: { undoDepth: number; redoDepth: number } } = {
         opGroup: result.opGroup,
         affectedNodes: result.affectedNodes,
         nodeIds: result.nodeIds,
         depths: overrides.depths(anchor.site_id),
       };
-      return body;
+      return responseBody;
     },
   );
 

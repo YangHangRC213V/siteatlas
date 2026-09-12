@@ -72,6 +72,12 @@ export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   /** 拖拽悬停目标：null = 没有，'' = 根层，其他 = 节点 id */
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  /**
+   * 正在拖拽的节点 id（ref 同步保存）。
+   * 不能只依赖 store 里的 dragging：dragstart → drop 可能在同一帧内完成，
+   * React 状态更新尚未落地，drop 读到空数组就直接放弃了（拖拽"没反应"的根因）。
+   */
+  const dragIdsRef = useRef<string[]>([]);
 
   useEffect(() => {
     void bind(siteId);
@@ -159,15 +165,23 @@ export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
   const totalSize = virtualizer.getTotalSize();
 
   const dragOver = (event: React.DragEvent, targetId: string | null): void => {
-    if (targetId !== null && dragging.includes(targetId)) return;
+    if (targetId !== null && dragIdsRef.current.includes(targetId)) return;
+    // 必须 preventDefault，否则浏览器不会把它当成有效放置目标、drop 事件不触发
     event.preventDefault();
+    event.stopPropagation();
+    if (event.dataTransfer !== null) event.dataTransfer.dropEffect = 'move';
     setDropTarget(targetId);
   };
 
   const drop = (event: React.DragEvent, targetId: string | null): void => {
     event.preventDefault();
+    // 阻止冒泡：行的 drop 会继续冒到容器的「放到根层」处理器，
+    // 导致同一次拖拽先挂到目标行、紧接着又被移回根层（踩过的坑：拖拽"看起来没反应"）
+    event.stopPropagation();
     setDropTarget(null);
-    const ids = dragging.length > 0 ? dragging : [];
+    // 优先用 ref（同步）里的拖拽集合，state 作为兜底
+    const ids = dragIdsRef.current.length > 0 ? dragIdsRef.current : dragging;
+    dragIdsRef.current = [];
     setDragging([]);
     if (ids.length === 0) return;
     if (targetId !== null && ids.includes(targetId)) return;
@@ -356,14 +370,23 @@ export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
                               if (exclusive) toggleSelect(row.node.id, true);
                             }}
                             onToggleSelect={() => toggleSelect(row.node.id)}
-                            onDragStart={() => {
+                            onDragStart={(event) => {
                               const ids =
                                 selectedIds.length > 0
                                   ? [...new Set([...selectedIds, row.node.id])]
                                   : [row.node.id];
+                              dragIdsRef.current = ids;
                               setDragging(ids);
+                              // 明确写入 dataTransfer：空 dataTransfer 会让部分浏览器取消拖拽
+                              if (event.dataTransfer !== null) {
+                                event.dataTransfer.effectAllowed = 'move';
+                                event.dataTransfer.setData('text/plain', ids.join(','));
+                              }
                             }}
-                            onDragEnd={() => setDragging([])}
+                            onDragEnd={() => {
+                              dragIdsRef.current = [];
+                              setDragging([]);
+                            }}
                             onDragOver={(e) => dragOver(e, row.node.id)}
                             onDrop={(e) => drop(e, row.node.id)}
                           />
@@ -479,7 +502,7 @@ function TreeRowView({
   onToggle: () => void;
   onSelect: (exclusive: boolean) => void;
   onToggleSelect: () => void;
-  onDragStart: () => void;
+  onDragStart: (event: React.DragEvent) => void;
   onDragEnd: () => void;
   onDragOver: (event: React.DragEvent) => void;
   onDrop: (event: React.DragEvent) => void;
