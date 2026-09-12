@@ -25,6 +25,7 @@ import { deriveLabel, kindLabel, useTreeStore, type TreeRow, type TreeViewKind }
 import { IndentedView } from './IndentedView.tsx';
 import { TopoView } from './TopoView.tsx';
 import { RemoteBrowserView } from '../../components/RemoteBrowserView.tsx';
+import { applyMaximizedAttribute, useFullscreen } from '../../components/useFullscreen.ts';
 import { useManualStore } from '../manual/store.ts';
 import type { GraphNode } from './store.ts';
 import './tree.css';
@@ -91,6 +92,25 @@ export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
   const loadGraph = useTreeStore((s) => s.loadGraph);
   const refreshExpandedBranches = useTreeStore((s) => s.refreshExpandedBranches);
   const setWebNode = useTreeStore((s) => s.setWebNode);
+
+  // 网页视图放大：应用内最大化 + 浏览器真全屏（两个独立开关，可组合）
+  const fullscreen = useFullscreen();
+  const webPanelRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    applyMaximizedAttribute(fullscreen.maximized && webNodeId !== null);
+  }, [fullscreen.maximized, webNodeId]);
+
+  // Esc 先退最大化，再关网页视图（不与应用内的其它快捷键冲突）
+  useEffect(() => {
+    if (webNodeId === null) return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return;
+      if (fullscreen.maximized || fullscreen.browserFullscreen) fullscreen.exit();
+      else setWebNode(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [webNodeId, fullscreen, setWebNode]);
   const redo = useTreeStore((s) => s.redo);
   const revertNode = useTreeStore((s) => s.revertNode);
   const select = useTreeStore((s) => s.select);
@@ -568,13 +588,31 @@ export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
             </aside>
 
             {webNodeId !== null && (
-              <aside className="panel tree-web" aria-label="原始网页" data-testid="tree-web-view">
+              <aside className="panel tree-web" aria-label="原始网页" data-testid="tree-web-view" ref={webPanelRef}>
                 <header className="crawl-panel__head">
                   <h2>原始网页</h2>
                   <span className="field__hint">
                     {manualState?.clicks.paired ?? 0} 次配对 → 新建 {manualState?.nodesCreated ?? 0} 个节点 /{' '}
                     {manualState?.edgesCreated ?? 0} 条边
                   </span>
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    data-testid="web-maximize"
+                    onClick={() => fullscreen.toggleMaximize()}
+                    title="最大化画面（隐藏其它面板；Esc 退出）"
+                  >
+                    {fullscreen.maximized ? '⤡ 退出最大化' : '⤢ 最大化'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn--sm"
+                    data-testid="web-fullscreen"
+                    onClick={() => fullscreen.toggleBrowserFullscreen(webPanelRef.current)}
+                    title="浏览器全屏显示这块画面（支持时用 F11 / Esc 退出）"
+                  >
+                    {fullscreen.browserFullscreen ? '⤡ 退出全屏' : '⛶ 全屏'}
+                  </button>
                   <button type="button" className="btn btn--sm btn--ghost" onClick={() => setWebNode(null)}>
                     收起
                   </button>
@@ -603,7 +641,11 @@ export function TreePage({ siteId }: TreePageProps): React.JSX.Element {
                         结束
                       </button>
                     </div>
-                    <RemoteBrowserView viewport={manualViewport} interactive={manualState?.status === 'running'} />
+                    <RemoteBrowserView
+                      viewport={manualViewport}
+                      interactive={manualState?.status === 'running'}
+                      fit={fullscreen.maximized || fullscreen.browserFullscreen ? 'fill' : 'contain'}
+                    />
                     <p className="field__hint">
                       在画面里点击**未收录的链接**：会自动新建节点与边并刷新左侧拓扑（已收录的链接只补边，不重复建节点）。
                       页内锚点/JS 行为等未触发导航的点击进「待确认」，可在采集页处理。

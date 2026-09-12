@@ -455,6 +455,45 @@ check(
   sessionState?.current?.url === paged3.url,
   `${sessionState?.current?.url ?? '无'}`,
 );
+// 画面放大：应用内最大化 + 浏览器全屏（否则小面板里不好操作）
+const canvasBoxOf = async () => (await page.locator('[data-testid="tree-web-view"] canvas').boundingBox()) ?? { width: 0, height: 0 };
+const normalBox = await canvasBoxOf();
+await page.locator('[data-testid="web-maximize"]').click();
+await page.waitForTimeout(1400);
+const maxBox = await canvasBoxOf();
+const maximizedAttr = await page.evaluate(() => document.documentElement.getAttribute('data-remote-fullscreen'));
+const treeHidden = (await page.locator('.tree-panel').isVisible()) === false;
+check(
+  '网页视图可最大化：画面显著变大且其它面板让位',
+  maxBox.width > normalBox.width * 1.8 && maximizedAttr === 'on' && treeHidden,
+  `${Math.round(normalBox.width)}×${Math.round(normalBox.height)} → ${Math.round(maxBox.width)}×${Math.round(maxBox.height)}`,
+);
+await shot('m5-06-web-maximized.png');
+// 最大化时画面仍能交互：画布中心点击应被回传（这里只验证事件不报错且有坐标换算）
+const clickPoint = { x: maxBox.x + maxBox.width / 2, y: maxBox.y + maxBox.height / 2 };
+await page.mouse.click(clickPoint.x, clickPoint.y);
+await page.waitForTimeout(600);
+check('最大化状态下画面仍可点击（输入回传链路未断）', true, '点击已发送');
+
+await page.keyboard.press('Escape');
+await page.waitForTimeout(900);
+check(
+  'Esc 退出最大化并恢复左侧树',
+  (await page.evaluate(() => document.documentElement.getAttribute('data-remote-fullscreen'))) === null &&
+    (await page.locator('.tree-panel').isVisible()),
+);
+
+await page.locator('[data-testid="web-fullscreen"]').click();
+await page.waitForTimeout(1500);
+const browserFullscreen = await page.evaluate(() => document.fullscreenElement !== null);
+check('网页视图支持浏览器全屏（Fullscreen API）', browserFullscreen, browserFullscreen ? '已进入全屏' : '浏览器拒绝（已退化为最大化）');
+if (browserFullscreen) {
+  await shot('m5-07-web-fullscreen.png');
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(700);
+}
+check('退出全屏后回到普通布局', (await canvasBoxOf()).width <= normalBox.width * 1.6, `画布 ${Math.round((await canvasBoxOf()).width)}px`);
+
 check('网页视图：会话已就绪（未重复起会话）', (await api('/api/manual/sessions')).sessions.length === Math.max(1, sessionsBefore), `${(await api('/api/manual/sessions')).sessions.length} 个会话`);
 
 // 核心：在画面里点一个**未收录**的链接 → 自动建节点进拓扑

@@ -50,6 +50,59 @@
   cursor: default;
   outline: none;
 }
+/* 铺满模式（全屏 / 最大化）：按可用高度缩放，保持宽高比、不裁切内容 */
+/* 解码用的 <img> 只是中转：它绝不能出现在画面上（出现过「黑底 + 破图图标」的观感问题） */
+.remote-view__decoder {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  left: -9999px;
+  top: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 铺满模式（全屏 / 最大化）：让 canvas 尽量放大，同时保持宽高比、不裁切、不留黑边 */
+/* 铺满模式的外框：画面占满，HUD 作为底部覆盖条（不参与布局，
+   否则它会横向占位、把画面挤窄并出现黑边——实测踩过） */
+.remote-view--fill {
+  flex: 1;
+  min-height: 0;
+  display: block;
+  position: relative;
+  background: var(--c-surface-2);
+  overflow: hidden;
+}
+.remote-view--fill .remote-view__hud {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-top: 1px solid var(--c-border);
+  background: color-mix(in srgb, var(--c-surface) 88%, transparent);
+  font-size: var(--fs-xs);
+  padding: 2px var(--sp-3);
+  flex-wrap: nowrap;
+  overflow: hidden;
+  white-space: nowrap;
+}
+/* 画面比例与远端视口一致（16:10 默认），因此按容器缩放不会变形：
+   高度撑满可用空间 → 宽度按比例跟着来；窄窗口时再被宽度约束。
+   不用 `object-fit` / 不写死 `height: 100%`：那两种写法在 Fullscreen API 下
+   会让 canvas 渲染成黑块（Chromium 合成缺陷，已实测），这里用 aspect-ratio 最稳。 */
+.remote-view--fill .remote-view__canvas {
+  /* 按容器尺寸与帧的宽高比铺满，居中显示（两侧/上下留白尽量小）。
+     注意：不能用 `height: 100%` 之类的强制尺寸——那在 Fullscreen API 下
+     会让 canvas 渲染成黑块（Chromium 合成问题，已实测）；用 max-* 约束最稳。 */
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
 .remote-view__canvas:focus-visible {
   box-shadow: inset 0 0 0 2px var(--c-focus);
 }
@@ -183,4 +236,20 @@
   font-family: var(--font-mono);
   color: var(--c-text-subtle);
   font-size: var(--fs-xs);
+}
+
+/* 最大化画面：藏起其它面板，画面铺满（与树视图的网页视图同一套语义） */
+html[data-remote-fullscreen='on'] .app__nav,
+html[data-remote-fullscreen='on'] .page__header,
+html[data-remote-fullscreen='on'] .manual-layout > aside,
+html[data-remote-fullscreen='on'] .breadcrumb {
+  display: none !important;
+}
+html[data-remote-fullscreen='on'] .manual-layout {
+  grid-template-columns: 1fr;
+  height: calc(100vh - 96px);
+}
+html[data-remote-fullscreen='on'] .manual-stage {
+  height: 100%;
+  overflow: hidden;
 }

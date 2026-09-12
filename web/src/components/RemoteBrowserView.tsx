@@ -21,6 +21,12 @@ export interface RemoteBrowserViewProps {
   /** 是否可交互（暂停/结束后只读） */
   interactive: boolean;
   className?: string;
+  /**
+   * 画面适配方式：
+   *   · contain（默认）—— 按宽度缩放，最高 64vh（面板里用）；
+   *   · fill —— 铺满父容器可用高度（全屏/最大化时用，避免画面只占屏幕中间一条）。
+   */
+  fit?: 'contain' | 'fill';
 }
 
 const MODIFIER_BITS = { alt: 1, ctrl: 2, meta: 4, shift: 8 } as const;
@@ -84,7 +90,7 @@ function specialKeyCode(key: string): number {
   }
 }
 
-export function RemoteBrowserView({ viewport, interactive, className }: RemoteBrowserViewProps): React.JSX.Element {
+export function RemoteBrowserView({ viewport, interactive, className, fit = 'contain' }: RemoteBrowserViewProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const [ready, setReady] = useState(false);
@@ -96,6 +102,39 @@ export function RemoteBrowserView({ viewport, interactive, className }: RemoteBr
   /** 订阅帧：只保留最新一帧（解码是异步的，用「连续解码循环」避免堆积） */
   const pendingFrameRef = useRef<{ data: string; at: number } | null>(null);
   const drawingRef = useRef(false);
+
+  /**
+   * 最近一次成功解码的帧。
+   * 用途：显示尺寸变化（最大化 / 全屏 / 窗口 resize）后必须**重画一次**——
+   * 只让 CSS 缩放 canvas 在 Chromium 上会出现「渲染成黑块」的合成问题（实测），
+   * 重画会强制重新光栅化，问题随之消失。
+   */
+  const lastImageRef = useRef<{ image: HTMLImageElement } | null>(null);
+
+  /** 把最近的帧按当前画布尺寸重画（尺寸变化时调用） */
+  const redraw = useCallback(() => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext('2d');
+    const last = lastImageRef.current;
+    if (canvas === null || context === null || context === undefined || last === null) return;
+    context.drawImage(last.image, 0, 0, canvas.width, canvas.height);
+  }, []);
+
+  /**
+   * 显示尺寸变化（最大化 / 全屏 / 拖窗口）后重画最近一帧。
+   * 不做这一步：canvas 被 CSS 放大时在 Chromium 上会渲染成黑块（实测踩过）。
+   */
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas === null || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      // 尺寸稳定后再画，避免 resize 过程中的中间态
+      window.requestAnimationFrame(() => redraw());
+    });
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, [redraw]);
+
 
   const drawLoop = useCallback(() => {
     if (drawingRef.current) return;
@@ -117,6 +156,7 @@ export function RemoteBrowserView({ viewport, interactive, className }: RemoteBr
         canvas.height = image.naturalHeight;
       }
       context.drawImage(image, 0, 0, canvas.width, canvas.height);
+      lastImageRef.current = { image };
       setReady(true);
       setLastAt(frame.at);
       drawingRef.current = false;
@@ -216,7 +256,7 @@ export function RemoteBrowserView({ viewport, interactive, className }: RemoteBr
   };
 
   return (
-    <div className={`remote-view${className !== undefined ? ` ${className}` : ''}`}>
+    <div className={`remote-view remote-view--${fit}${className !== undefined ? ` ${className}` : ''}`}>
       <canvas
         ref={canvasRef}
         className="remote-view__canvas"

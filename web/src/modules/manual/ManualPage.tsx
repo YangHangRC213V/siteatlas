@@ -5,10 +5,11 @@
  * 控制条满足 requirements §4.3：开始-暂停-暂停后继续-回根-展开一层-结束并保存，
  * 外加「回父节点」「以当前页为根」「置为父节点」（§6.5 的兜底）。
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { navigate } from '../../router/useRoute.ts';
 import { sitesApi } from '../sites/api.ts';
 import { RemoteBrowserView } from '../../components/RemoteBrowserView.tsx';
+import { applyMaximizedAttribute, useFullscreen } from '../../components/useFullscreen.ts';
 import { useManualStore } from './store.ts';
 import { MANUAL_STATUS_LABELS } from './types.ts';
 import './manual.css';
@@ -59,6 +60,12 @@ export function ManualPage({ siteId }: ManualPageProps): React.JSX.Element {
       cancelled = true;
     };
   }, [siteId]);
+
+  const fullscreen = useFullscreen();
+  const stageRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    applyMaximizedAttribute(fullscreen.maximized);
+  }, [fullscreen.maximized]);
 
   const status = state?.status ?? 'idle';
   const interactive = status === 'running';
@@ -176,7 +183,7 @@ export function ManualPage({ siteId }: ManualPageProps): React.JSX.Element {
       ) : null}
 
       <div className="manual-layout">
-        <section className="panel manual-stage" aria-label="远端浏览器">
+        <section className="panel manual-stage" aria-label="远端浏览器" ref={stageRef}>
           {sessionId === null ? (
             <div className="empty">
               <span className="empty__icon" aria-hidden="true">
@@ -209,7 +216,11 @@ export function ManualPage({ siteId }: ManualPageProps): React.JSX.Element {
                   前往
                 </button>
               </div>
-              <RemoteBrowserView viewport={viewport} interactive={interactive} />
+              <RemoteBrowserView
+                viewport={viewport}
+                interactive={interactive}
+                fit={fullscreen.maximized || fullscreen.browserFullscreen ? 'fill' : 'contain'}
+              />
             </>
           )}
         </section>

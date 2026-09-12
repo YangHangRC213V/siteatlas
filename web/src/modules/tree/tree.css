@@ -392,3 +392,28 @@
 .tree-web__bar .input {
   flex: 1;
 }
+
+/* ---------- 网页视图全屏 / 最大化（画面太小不好操作时的放大方式） ---------- */
+/* 最大化：隐藏其它面板，只留网页视图铺满内容区 */
+html[data-remote-fullscreen='on'] .app__nav,
+html[data-remote-fullscreen='on'] .tree-toolbar,
+html[data-remote-fullscreen='on'] .tree-panel,
+html[data-remote-fullscreen='on'] .tree-detail,
+html[data-remote-fullscreen='on'] .tree-trash,
+html[data-remote-fullscreen='on'] .page__header,
+html[data-remote-fullscreen='on'] .tree-hint {
+  display: none !important;
+}
+html[data-remote-fullscreen='on'] .tree-layout {
+  grid-template-columns: 1fr;
+  height: calc(100vh - 96px);
+}
+html[data-remote-fullscreen='on'] .tree-web {
+  height: 100%;
+  overflow: hidden;
+}
+/* 真全屏（Fullscreen API）：整个页面已经没有别的元素，画面撑满 */
+html[data-remote-fullscreen='on']:fullscreen .tree-layout,
+html[data-remote-fullscreen='on']:-webkit-full-screen .tree-layout {
+  height: 100vh;
+}
