@@ -462,3 +462,98 @@ export interface EdgeRecord {
   order_in_page: number | null;
   created_at: number;
 }
+
+/* ---------------- M3 手动（引导式）采集 ---------------- */
+
+export const MANUAL_STATUSES = ['idle', 'running', 'paused', 'ended'] as const;
+export type ManualSessionStatus = (typeof MANUAL_STATUSES)[number];
+
+export type ManualProgressMode = 'record-only' | 'record-and-expand';
+
+/** 当前页面身份（由 identityKey 匹配已知节点得出） */
+export interface ManualIdentity {
+  nodeId: string;
+  url: string;
+  identityKey: string;
+  /** 该节点在树中的有效父节点 */
+  parentId: string | null;
+  depth: number;
+  displayLabel: string | null;
+  /** 是否为本次会话新建 */
+  fresh: boolean;
+}
+
+export interface ManualClickStats {
+  total: number;
+  /** 与随后的导航配对成功（真实跳转） */
+  paired: number;
+  /** 窗口内没有导航：页内锚点 / JS 行为 / 新标签 */
+  unpaired: number;
+  /** 目标已存在、只补边不建节点 */
+  skippedDuplicate: number;
+}
+
+export interface ManualScreencastStats {
+  received: number;
+  delivered: number;
+  dropped: number;
+  lastFrameAt: number | null;
+  lastFrameBytes: number;
+}
+
+export interface ManualSessionState {
+  sessionId: string;
+  siteId: string;
+  status: ManualSessionStatus;
+  /** 是否已绑定浏览器页面（画面可用） */
+  guideEnabled: boolean;
+  progressMode: ManualProgressMode;
+  current: ManualIdentity | null;
+  rootNodeId: string;
+  rootUrl: string;
+  clicks: ManualClickStats;
+  nodesCreated: number;
+  edgesCreated: number;
+  pendingConfirmCount: number;
+  screencast: ManualScreencastStats;
+  lastNavigatedUrl: string | null;
+  lastError: string | null;
+}
+
+/** 页面内被点元素的快照（dev-spec §6.5 点击捕获） */
+export interface ClickCapturePayload {
+  kind: 'click';
+  tag: string;
+  anchorText: string;
+  selector: string;
+  domPath: string;
+  href: string | null;
+  rel: string | null;
+  target: string | null;
+  button: number;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+  x: number;
+  y: number;
+  at: number;
+}
+
+/** 待确认项：未与导航配对的点击 */
+export interface PendingConfirm {
+  id: string;
+  payload: ClickCapturePayload;
+  fromNodeId: string;
+  fromUrl: string;
+  /** 可能的目标（href 的规范化身份） */
+  candidateUrl: string | null;
+  reason: string;
+  at: number;
+}
+
+export interface ManualEventRecord {
+  at: number;
+  level: 'info' | 'warn' | 'error';
+  message: string;
+}

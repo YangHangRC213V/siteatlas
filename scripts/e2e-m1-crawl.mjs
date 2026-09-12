@@ -73,8 +73,9 @@ const started = await api(`/api/sites/${siteId}/crawl`, {
 console.log(`任务启动：${started.task.id}`);
 
 // 4) 浏览器：打开采集控制台，截「运行中」画面
-const channel = process.env['PW_CHANNEL'] ?? 'chrome';
-const browser = await chromium.launch({ channel });
+// 默认用 Playwright 自带 Chromium（v1243）；PW_CHANNEL=chrome 可切系统 Chrome
+const channel = process.env['PW_CHANNEL'];
+const browser = await chromium.launch(channel === undefined || channel === '' ? {} : { channel });
 const page = await browser.newPage({ viewport: { width: 1440, height: 940 } });
 await page.goto(`${baseUrl}/sites/${siteId}/crawl`, { waitUntil: 'networkidle' });
 await page.waitForSelector('.crawl-metrics');

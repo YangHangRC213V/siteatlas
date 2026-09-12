@@ -134,6 +134,9 @@ export function CrawlPage({ siteId }: CrawlPageProps): React.JSX.Element {
           <button type="button" className="btn btn--ghost" onClick={() => navigate(`/sites/${siteId}/tree`)}>
             看树视图 →
           </button>
+          <button type="button" className="btn" onClick={() => navigate(`/sites/${siteId}/manual`)} title="引导式手动采集（M3）">
+            🖱 手动采集
+          </button>
         </div>
       </header>
 

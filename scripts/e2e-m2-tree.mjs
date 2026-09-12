@@ -77,8 +77,9 @@ if (docsNode === undefined || teamNode === undefined) throw new Error('演示站
 const rowByUrl = (url) => page.locator(`.tree-row[title="${url}"]`).first();
 
 // ---------- 浏览器 ----------
-const channel = process.env['PW_CHANNEL'] ?? 'chrome';
-const browser = await chromium.launch({ channel });
+// 默认用 Playwright 自带 Chromium（v1243）；PW_CHANNEL=chrome 可切系统 Chrome
+const channel = process.env['PW_CHANNEL'];
+const browser = await chromium.launch(channel === undefined || channel === '' ? {} : { channel });
 const page = await browser.newPage({ viewport: { width: 1440, height: 940 } });
 const shot = async (name) => {
   const file = resolve(outDir, name);
