@@ -153,3 +153,104 @@
   font-size: var(--fs-xs);
   white-space: nowrap;
 }
+
+/* ---------- M2：多选、拖拽、批量条、回收站、修改历史 ---------- */
+.tree-batchbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3);
+  margin-bottom: var(--sp-3);
+  border: 1px solid var(--c-primary);
+  background: var(--c-primary-soft);
+  border-radius: var(--r-md);
+}
+
+.tree-row__check {
+  flex: 0 0 auto;
+  margin: 0 var(--sp-1) 0 0;
+  cursor: pointer;
+}
+.tree-row[draggable='true'] {
+  cursor: grab;
+}
+.tree-row--dragging {
+  opacity: 0.5;
+}
+.tree-row--drop {
+  background: var(--c-accent-soft);
+  border-left: 2px solid var(--c-accent);
+}
+.tree-viewport--drop-root {
+  box-shadow: inset 0 0 0 2px var(--c-accent);
+  border-radius: var(--r-md);
+}
+.tree-hint {
+  padding: var(--sp-2) var(--sp-3) var(--sp-1);
+}
+
+.trash-list {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.trash-list__item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  background: var(--c-surface-2);
+}
+.trash-list__label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+}
+.history-list__item {
+  display: grid;
+  grid-template-columns: 64px 84px 1fr;
+  gap: var(--sp-2);
+  align-items: center;
+}
+.history-list__kind {
+  color: var(--c-text-muted);
+}
+.history-list__value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--c-text-subtle);
+}
+
+.link-button {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--c-primary);
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.link-button:hover {
+  text-decoration: underline;
+}

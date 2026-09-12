@@ -394,6 +394,8 @@ export interface DeleteNodesResponse {
 
 export interface UndoRedoResponse {
   action: 'undo' | 'redo';
+  /** 本次撤销/重做的操作类型（parent/url/alias/title/deleted/reverted） */
+  kind: string;
   /** 本次影响的 override 行数 */
   affected: number;
   rows: OverrideRecord[];

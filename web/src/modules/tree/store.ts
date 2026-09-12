@@ -1,12 +1,17 @@
 /**
- * 树模块状态（Zustand）：懒加载 + 折叠展开 + 扁平化（供虚拟滚动）+ 节点抽屉
+ * 树模块状态（Zustand）：懒加载 + 折叠展开 + 扁平化（供虚拟滚动）+ 节点抽屉 + 修正层操作
  *
- * dev-spec §1 强制：子节点必须按 parent_id 懒加载 + 分页；
+ * dev-spec §1 强制：子节点按 parent_id 懒加载 + 分页；
  * §4.5/§6.4：行内只显示短标签（别名 > 标题 > 路径末段），URL 不占布局，仅 tooltip。
+ * M2 新增：拖拽重挂、软删子树、撤销/重做、还原为自动结果、回收站恢复。
+ *
+ * 局部刷新策略：
+ *   - 重挂/软删/撤销后，用「受影响父节点的 id 集合」重新拉取这些父节点的子列表，
+ *     而不是整棵树刷新 —— 万级树下全量刷新会让虚拟滚动位置与展开状态全部丢失。
  */
 import { create } from 'zustand';
-import type { NodeRecord, TreeNodeRow } from '@siteatlas/shared';
-import { TreeApiError, treeApi } from './api.ts';
+import type { NodeRecord, OverrideRecord, TreeNodeRow, TrashEntry } from '@siteatlas/shared';
+import { TreeApiError, treeApi, type NodeDetailPayload } from './api.ts';
 
 export interface TreeRow {
   node: TreeNodeRow;
@@ -16,51 +21,80 @@ export interface TreeRow {
   loading: boolean;
   /** 已加载的直接子节点数 */
   loadedChildren: number;
+  /** 多选状态（批量重挂/软删用） */
+  selected: boolean;
 }
 
-export interface NodeDetailState {
-  node: TreeNodeRow;
-  parents: Array<{ anchor: string | null; from: NodeRecord | null }>;
-  children: Array<{ order: number | null; to: NodeRecord | null }>;
-}
+export type TreeMode = 'tree' | 'trash';
 
 export interface TreeStoreState {
   siteId: string | null;
   rows: TreeRow[];
   loading: boolean;
   error: string | null;
+  /** 提示条（最近一次操作的结果） */
+  notice: string | null;
   /** 关键字过滤（标题/别名/URL） */
   query: string;
   statusFilter: string | null;
-  detail: NodeDetailState | null;
+  regexMode: boolean;
+  /** 服务端检索结果（有 query/depth/status 时用；为空表示走本地过滤） */
+  searchHits: Array<{ id: string; url: string; display_label: string | null; depth: number; status: string }> | null;
+
+  mode: TreeMode;
+  trash: TrashEntry[];
+
+  detail: NodeDetailPayload | null;
   detailLoading: boolean;
   detailError: string | null;
   saving: boolean;
 
+  depths: { undoDepth: number; redoDepth: number };
+  busy: boolean;
+  /** 拖拽中的节点 id（多选时可能是多个） */
+  dragging: string[];
+
   bind: (siteId: string) => Promise<void>;
   unbind: () => void;
   loadRoot: () => Promise<void>;
+  reloadSubtrees: (parentIds: Array<string | null>) => Promise<void>;
   toggle: (nodeId: string) => Promise<void>;
   expandAll: (maxNodes?: number) => Promise<void>;
   collapseAll: () => void;
   setQuery: (query: string) => void;
   setStatusFilter: (status: string | null) => void;
+  setRegexMode: (value: boolean) => void;
+  runSearch: () => Promise<void>;
+  setMode: (mode: TreeMode) => Promise<void>;
+  loadTrash: () => Promise<void>;
+  restore: (nodeId: string) => Promise<void>;
+  toggleSelect: (nodeId: string, exclusive?: boolean) => void;
+  clearSelection: () => void;
+  moveNodes: (ids: string[], newParentId: string | null) => Promise<void>;
+  deleteNodes: (ids: string[]) => Promise<void>;
+  undo: () => Promise<void>;
+  redo: () => Promise<void>;
+  revertNode: (nodeId: string) => Promise<void>;
   select: (nodeId: string) => Promise<void>;
   closeDetail: () => void;
-  saveDetail: (patch: { alias?: string | null; title?: string | null }) => Promise<void>;
+  saveDetail: (patch: { alias?: string | null; title?: string | null; url?: string }) => Promise<void>;
+  clearNotice: () => void;
+  setDragging: (ids: string[]) => void;
+  refreshDepths: () => void;
 }
 
-function countLoadedChildren(rows: TreeRow[], parentId: string): number {
-  const index = rows.findIndex((r) => r.node.id === parentId);
-  if (index < 0) return 0;
-  const level = rows[index]?.level ?? 0;
-  let count = 0;
-  for (let i = index + 1; i < rows.length; i++) {
-    const row = rows[i];
-    if (row === undefined || row.level <= level) break;
-    if (row.level === level + 1) count += 1;
-  }
-  return count;
+const KIND_LABELS: Record<string, string> = {
+  parent: '重挂父节点',
+  url: '修改地址',
+  alias: '改别名',
+  title: '改标题',
+  deleted: '软删除子树',
+  reverted: '还原为自动结果',
+  locked: '锁定',
+};
+
+export function kindLabel(kind: string): string {
+  return KIND_LABELS[kind] ?? kind;
 }
 
 export const useTreeStore = create<TreeStoreState>((set, get) => ({
@@ -68,21 +102,29 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   rows: [],
   loading: false,
   error: null,
+  notice: null,
   query: '',
   statusFilter: null,
+  regexMode: false,
+  searchHits: null,
+  mode: 'tree',
+  trash: [],
   detail: null,
   detailLoading: false,
   detailError: null,
   saving: false,
+  depths: { undoDepth: 0, redoDepth: 0 },
+  busy: false,
+  dragging: [],
 
   async bind(siteId) {
     if (get().siteId === siteId && get().rows.length > 0) return;
-    set({ siteId, rows: [], detail: null, error: null, query: '', statusFilter: null });
+    set({ siteId, rows: [], detail: null, error: null, query: '', statusFilter: null, mode: 'tree', trash: [], searchHits: null });
     await get().loadRoot();
   },
 
   unbind() {
-    set({ siteId: null, rows: [], detail: null, error: null });
+    set({ siteId: null, rows: [], detail: null, error: null, searchHits: null });
   },
 
   async loadRoot() {
@@ -92,12 +134,73 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
     try {
       const page = await treeApi.children(siteId, null, 0, 50);
       set({
-        rows: page.nodes.map((node) => ({ node, level: 0, expanded: false, loading: false, loadedChildren: 0 })),
+        rows: page.nodes.map((node) => ({
+          node,
+          level: 0,
+          expanded: false,
+          loading: false,
+          loadedChildren: 0,
+          selected: false,
+        })),
         loading: false,
         error: null,
       });
+      get().refreshDepths();
     } catch (err) {
       set({ loading: false, error: err instanceof TreeApiError ? err.message : String(err) });
+    }
+  },
+
+  refreshDepths() {
+    const detail = get().detail;
+    if (detail !== null) set({ depths: detail.depths });
+  },
+
+  /**
+   * 局部刷新：只重新拉取这些父节点的子列表（保留其余展开状态与滚动位置）。
+   * parentId=null 表示根层。
+   */
+  async reloadSubtrees(parentIds) {
+    const siteId = get().siteId;
+    if (siteId === null) return;
+    const unique = [...new Set(parentIds)];
+    for (const parentId of unique) {
+      const rows = get().rows;
+      const index = parentId === null ? -1 : rows.findIndex((r) => r.node.id === parentId);
+      if (parentId !== null && index < 0) continue;
+      const level = parentId === null ? 0 : (rows[index] as TreeRow).level + 1;
+      const expanded = parentId === null ? true : (rows[index] as TreeRow).expanded;
+      if (!expanded) continue;
+      try {
+        const page = await treeApi.children(siteId, parentId, 0, 500);
+        const current = get().rows;
+        const at = parentId === null ? -1 : current.findIndex((r) => r.node.id === parentId);
+        if (parentId !== null && at < 0) continue;
+        // 删除该父节点原有的子树行
+        const next = [...current];
+        const start = at + 1;
+        let end = start;
+        while (end < next.length && (next[end] as TreeRow).level > level - 1) end += 1;
+        next.splice(start, end - start);
+        // 插入新拉取的子行
+        const children: TreeRow[] = page.nodes.map((node) => ({
+          node,
+          level,
+          expanded: false,
+          loading: false,
+          loadedChildren: 0,
+          selected: false,
+        }));
+        if (parentId === null) {
+          set({ rows: children });
+        } else {
+          next.splice(start, 0, ...children);
+          next[at] = { ...(next[at] as TreeRow), loadedChildren: children.length, expanded: true };
+          set({ rows: next });
+        }
+      } catch (err) {
+        set({ error: err instanceof TreeApiError ? err.message : String(err) });
+      }
     }
   },
 
@@ -108,7 +211,6 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
     if (row === undefined) return;
 
     if (row.expanded) {
-      // 折叠：移除其后所有更深层级行
       const rows = [...state.rows];
       let end = index + 1;
       while (end < rows.length && (rows[end]?.level ?? 0) > row.level) end += 1;
@@ -119,7 +221,6 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
     }
 
     if (row.loadedChildren > 0) {
-      // 已加载过：仅展开（不重复请求）
       const rows = [...state.rows];
       rows.splice(index, 1, { ...row, expanded: true });
       set({ rows });
@@ -139,13 +240,19 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
       if (at < 0) return;
       const children: TreeRow[] = page.nodes.map((child) => ({
         node: child,
-        level: (current[at]?.level ?? 0) + 1,
+        level: (current[at] as TreeRow).level + 1,
         expanded: false,
         loading: false,
         loadedChildren: 0,
+        selected: false,
       }));
       const next = [...current];
-      next.splice(at, 1, { ...(current[at] as TreeRow), loading: false, expanded: true, loadedChildren: children.length });
+      next.splice(at, 1, {
+        ...(current[at] as TreeRow),
+        loading: false,
+        expanded: true,
+        loadedChildren: children.length,
+      });
       next.splice(at + 1, 0, ...children);
       set({ rows: next });
     } catch (err) {
@@ -163,7 +270,6 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   async expandAll(maxNodes = 800) {
     const siteId = get().siteId;
     if (siteId === null) return;
-    // 广度优先逐层展开，直到没有可展开节点或达到上限（防止误点把万级树全拉下来）
     for (let guard = 0; guard < 12; guard++) {
       const pending = get()
         .rows.filter((r) => !r.expanded && r.node.child_count > 0)
@@ -192,18 +298,198 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
     set({ statusFilter: status });
   },
 
+  setRegexMode(value) {
+    set({ regexMode: value });
+  },
+
+  /** 服务端检索（走 GET /api/sites/:id/search，大站不必把整棵树拉进内存） */
+  async runSearch() {
+    const state = get();
+    const siteId = state.siteId;
+    if (siteId === null) return;
+    const q = state.query.trim();
+    if (q.length === 0 && state.statusFilter === null) {
+      set({ searchHits: null });
+      return;
+    }
+    try {
+      const result = await treeApi.search(siteId, {
+        q,
+        status: state.statusFilter,
+        regex: state.regexMode,
+        limit: 200,
+      });
+      set({ searchHits: result.nodes, error: null });
+    } catch (err) {
+      set({ error: err instanceof TreeApiError ? err.message : String(err), searchHits: [] });
+    }
+  },
+
+  async setMode(mode) {
+    set({ mode, detail: null });
+    if (mode === 'trash') await get().loadTrash();
+    else await get().loadRoot();
+  },
+
+  async loadTrash() {
+    const siteId = get().siteId;
+    if (siteId === null) return;
+    set({ loading: true });
+    try {
+      const response = await treeApi.trash(siteId);
+      set({ trash: response.entries, loading: false, error: null });
+    } catch (err) {
+      set({ loading: false, error: err instanceof TreeApiError ? err.message : String(err) });
+    }
+  },
+
+  async restore(nodeId) {
+    const siteId = get().siteId;
+    if (siteId === null) return;
+    set({ busy: true });
+    try {
+      const result = await treeApi.restoreFromTrash(siteId, nodeId);
+      set({ notice: `已恢复 ${result.restored} 个节点（恢复动作本身也可撤销）`, busy: false });
+      await get().loadTrash();
+    } catch (err) {
+      set({ busy: false, error: err instanceof TreeApiError ? err.message : String(err) });
+    }
+  },
+
+  toggleSelect(nodeId, exclusive = false) {
+    const rows = get().rows.map((row) => {
+      if (exclusive) return { ...row, selected: row.node.id === nodeId };
+      if (row.node.id === nodeId) return { ...row, selected: !row.selected };
+      return row;
+    });
+    set({ rows });
+  },
+
+  clearSelection() {
+    set({ rows: get().rows.map((row) => (row.selected ? { ...row, selected: false } : row)) });
+  },
+
+  setDragging(ids) {
+    set({ dragging: ids });
+  },
+
+  /** 重挂（支持批量）：写修正层，成功后局部刷新受影响的两棵子树 */
+  async moveNodes(ids, newParentId) {
+    const state = get();
+    const siteId = state.siteId;
+    if (siteId === null || ids.length === 0) return;
+    set({ busy: true, notice: null });
+    try {
+      const affectedParents = new Set<string | null>([newParentId]);
+      for (const id of ids) {
+        const row = state.rows.find((r) => r.node.id === id);
+        if (row !== undefined) {
+          const parent = state.rows.find((r) => r.node.id === id)?.node.effective_parent_id ?? null;
+          affectedParents.add(parent);
+        }
+        // 折叠被移动的节点，避免留下悬空的子行
+        void row;
+      }
+      const result = await treeApi.move(ids[0] as string, newParentId, ids);
+      set({
+        busy: false,
+        notice:
+          result.moved === 0
+            ? '目标与当前父节点相同，未产生修改'
+            : `已重挂 ${result.moved} 个节点（可 ⌘Z 撤销）`,
+      });
+      await get().reloadSubtrees([...affectedParents]);
+      set({ rows: get().rows.map((r) => ({ ...r, selected: false })) });
+    } catch (err) {
+      set({ busy: false, error: err instanceof TreeApiError ? `${err.message}（${err.code}）` : String(err) });
+    }
+  },
+
+  /** 软删子树（二次确认在 UI 层）：返回影响面 */
+  async deleteNodes(ids) {
+    const state = get();
+    const siteId = state.siteId;
+    if (siteId === null || ids.length === 0) return;
+    set({ busy: true, notice: null });
+    try {
+      const affectedParents = new Set<string | null>();
+      for (const id of ids) {
+        const row = state.rows.find((r) => r.node.id === id);
+        if (row !== undefined) affectedParents.add(row.node.effective_parent_id);
+      }
+      const result = await treeApi.remove(ids[0] as string, ids);
+      set({
+        busy: false,
+        notice: `已软删 ${result.affectedNodes} 个节点（进回收站，可 ⌘Z 撤销）`,
+        detail: state.detail !== null && result.nodeIds.includes(state.detail.node.id) ? null : state.detail,
+      });
+      await get().reloadSubtrees([...affectedParents]);
+      set({ rows: get().rows.map((r) => ({ ...r, selected: false })) });
+    } catch (err) {
+      set({ busy: false, error: err instanceof TreeApiError ? `${err.message}（${err.code}）` : String(err) });
+    }
+  },
+
+  async undo() {
+    const state = get();
+    const siteId = state.siteId;
+    if (siteId === null) return;
+    set({ busy: true });
+    try {
+      const result = await treeApi.undo(siteId);
+      set({
+        busy: false,
+        notice: `已撤销：${kindLabel(result.kind)}（影响 ${result.affected} 处）`,
+        depths: { undoDepth: result.undoDepth, redoDepth: result.redoDepth },
+      });
+      await get().reloadSubtrees([null, ...state.rows.filter((r) => r.expanded).map((r) => r.node.id)]);
+      if (state.mode === 'trash') await get().loadTrash();
+      if (state.detail !== null) await get().select(state.detail.node.id);
+    } catch (err) {
+      set({ busy: false, error: err instanceof TreeApiError ? `${err.message}（${err.code}）` : String(err) });
+    }
+  },
+
+  async redo() {
+    const state = get();
+    const siteId = state.siteId;
+    if (siteId === null) return;
+    set({ busy: true });
+    try {
+      const result = await treeApi.redo(siteId);
+      set({
+        busy: false,
+        notice: `已重做：${kindLabel(result.kind)}（影响 ${result.affected} 处）`,
+        depths: { undoDepth: result.undoDepth, redoDepth: result.redoDepth },
+      });
+      await get().reloadSubtrees([null, ...state.rows.filter((r) => r.expanded).map((r) => r.node.id)]);
+      if (state.mode === 'trash') await get().loadTrash();
+      if (state.detail !== null) await get().select(state.detail.node.id);
+    } catch (err) {
+      set({ busy: false, error: err instanceof TreeApiError ? `${err.message}（${err.code}）` : String(err) });
+    }
+  },
+
+  /** 还原为自动结果（单节点） */
+  async revertNode(nodeId) {
+    const state = get();
+    if (state.siteId === null) return;
+    set({ busy: true });
+    try {
+      await treeApi.revert(nodeId);
+      set({ busy: false, notice: '已还原为自动结果（该操作本身可撤销）' });
+      await get().reloadSubtrees([null, ...state.rows.filter((r) => r.expanded).map((r) => r.node.id)]);
+      await get().select(nodeId);
+    } catch (err) {
+      set({ busy: false, error: err instanceof TreeApiError ? `${err.message}（${err.code}）` : String(err) });
+    }
+  },
+
   async select(nodeId) {
     set({ detailLoading: true, detailError: null });
     try {
       const response = await treeApi.node(nodeId);
-      set({
-        detail: {
-          node: response.node,
-          parents: response.parents.map((p) => ({ anchor: p.edge.anchor_text, from: p.from })),
-          children: response.children.map((c) => ({ order: c.edge.order_in_page, to: c.to })),
-        },
-        detailLoading: false,
-      });
+      set({ detail: response, detailLoading: false, depths: response.depths });
     } catch (err) {
       set({ detailLoading: false, detailError: err instanceof TreeApiError ? err.message : String(err) });
     }
@@ -214,17 +500,23 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
   },
 
   async saveDetail(patch) {
-    const detail = get().detail;
+    const state = get();
+    const detail = state.detail;
     if (detail === null) return;
-    set({ saving: true });
+    set({ saving: true, notice: null });
     try {
       const response = await treeApi.patch(detail.node.id, patch);
-      const rows = get().rows.map((row) => (row.node.id === response.node.id ? { ...row, node: response.node } : row));
-      set({ rows, detail: { ...detail, node: response.node }, saving: false, detailError: null });
+      const rows = state.rows.map((row) => (row.node.id === response.node.id ? { ...row, node: response.node } : row));
+      set({ rows, saving: false, detailError: null, notice: '已保存修改（可 ⌘Z 撤销）' });
+      await get().select(detail.node.id);
     } catch (err) {
-      set({ saving: false, detailError: err instanceof TreeApiError ? err.message : String(err) });
+      set({ saving: false, detailError: err instanceof TreeApiError ? `${err.message}（${err.code}）` : String(err) });
     }
+  },
+
+  clearNotice() {
+    set({ notice: null });
   },
 }));
 
-export { countLoadedChildren };
+export type { NodeRecord, OverrideRecord, TrashEntry };

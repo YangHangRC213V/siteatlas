@@ -30,7 +30,15 @@ export function effectiveProjection(alias = 'v'): string {
     COALESCE((SELECT o.value FROM node_overrides o
               WHERE o.node_id = ${alias}.id AND o.field = 'deleted' AND o.undone = 0
               ORDER BY o.seq DESC LIMIT 1), ${alias}.is_deleted) AS is_deleted,
-    ${alias}.display_label AS display_label,
+    COALESCE(
+      NULLIF((SELECT o.value FROM node_overrides o
+              WHERE o.node_id = ${alias}.id AND o.field = 'alias' AND o.undone = 0
+              ORDER BY o.seq DESC LIMIT 1), ''),
+      NULLIF((SELECT o.value FROM node_overrides o
+              WHERE o.node_id = ${alias}.id AND o.field = 'title' AND o.undone = 0
+              ORDER BY o.seq DESC LIMIT 1), ''),
+      ${alias}.display_label
+    ) AS display_label,
     ${alias}.http_status AS http_status,
     ${alias}.content_type AS content_type,
     ${alias}.depth AS depth,

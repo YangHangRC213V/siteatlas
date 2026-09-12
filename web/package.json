@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@siteatlas/shared": "*",
+    "@tanstack/react-virtual": "^3.14.12",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "zustand": "^5.0.8"

@@ -7,6 +7,8 @@ import assert from 'node:assert/strict';
 import { openDb } from './db.ts';
 import { loadMigrations, migrate, splitStatements } from './migrate.ts';
 
+const EXPECTED_M2_TABLES = ['node_override_ops'];
+
 const EXPECTED_TABLES = [
   'sites',
   'nodes',
@@ -43,7 +45,7 @@ test('迁移建出 §4 全部表', () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
       .all() as Array<{ name: string }>;
     const names = rows.map((r) => r.name);
-    for (const t of EXPECTED_TABLES) assert.ok(names.includes(t), `缺少表 ${t}`);
+    for (const t of [...EXPECTED_TABLES, ...EXPECTED_M2_TABLES]) assert.ok(names.includes(t), `缺少表 ${t}`);
     assert.ok(names.includes('schema_migrations'), '缺少迁移记录表');
   } finally {
     handle.close();
@@ -72,10 +74,10 @@ test('迁移幂等：第二次执行全部跳过，不重复建表', () => {
   const handle = openDb({ file: ':memory:', runMigrations: false });
   try {
     const first = migrate(handle.db);
-    assert.deepEqual(first.applied, ['001_init']);
+    assert.deepEqual(first.applied, ['001_init', '002_override_operations']);
     const second = migrate(handle.db);
     assert.deepEqual(second.applied, []);
-    assert.deepEqual(second.skipped, ['001_init']);
+    assert.deepEqual(second.skipped, ['001_init', '002_override_operations']);
   } finally {
     handle.close();
   }
@@ -163,5 +165,6 @@ test('loadMigrations：按文件名排序且带校验和', () => {
   const migrations = loadMigrations();
   assert.ok(migrations.length >= 1);
   assert.equal(migrations[0]?.version, '001_init');
+  assert.equal(migrations[1]?.version, '002_override_operations');
   assert.match(migrations[0]?.checksum as string, /^[0-9a-f]{64}$/);
 });

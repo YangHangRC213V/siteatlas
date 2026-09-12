@@ -341,7 +341,8 @@ export async function registerTreeRoutes(app: FastifyInstance, deps: TreeRouteDe
         const result = action === 'undo' ? overrides.undo(request.params.id) : overrides.redo(request.params.id);
         const body: UndoRedoResponse = {
           action: result.action,
-          affected: result.rows.length,
+          kind: result.kind,
+          affected: result.affected,
           rows: result.rows,
           nodeIds: result.nodeIds,
           undoDepth: result.undoDepth,

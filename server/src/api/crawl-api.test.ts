@@ -144,7 +144,7 @@ test('M1 REST：GET /tree 懒加载多级节点、无重复、带子节点计数
     assert.equal(rootNode.depth, 0);
     assert.equal(rootNode.status, 'ok');
     assert.ok(rootNode.child_count >= 8, `根节点应有 >= 8 个子节点，实际 ${rootNode.child_count}`);
-    assert.equal(rootNode.has_override, 0, 'M1 尚未有人工修正');
+    assert.equal(rootNode.has_override, false, '尚未有人工修正');
     assert.equal(rootNode.effective_parent_id, null);
 
     // 懒加载根节点的子节点
@@ -201,7 +201,7 @@ test('M1 REST：GET /tree 懒加载多级节点、无重复、带子节点计数
   }
 });
 
-test('M1 REST：GET /api/nodes/:id 详情含入链出链；PATCH 改别名生效、改地址返回 501', async () => {
+test('M2 REST：GET /api/nodes/:id 详情含入链出链与修正历史；PATCH 改别名/地址写修正层', async () => {
   const h = await makeHarness();
   try {
     await h.app.inject({ method: 'POST', url: `/api/sites/${h.siteId}/crawl`, payload: { preset: PRESET } });
@@ -233,15 +233,24 @@ test('M1 REST：GET /api/nodes/:id 详情含入链出链；PATCH 改别名生效
     assert.equal(patched.statusCode, 200);
     assert.equal(patched.json().node.alias, '我们的团队');
     assert.equal(patched.json().node.display_label, '我们的团队', 'display_label 应优先取别名（§6.4）');
+    assert.equal(patched.json().node.has_override, true, '改别名后应带修正徽标');
 
-    // 改地址属 M2 修正层
+    // 改地址：M2 起写修正层（identity_key 不变，旧值进 prev_value 作为历史）
     const urlPatch = await h.app.inject({
       method: 'PATCH',
       url: `/api/nodes/${teamNode.id}`,
-      payload: { url: 'https://example.com/other' },
+      payload: { url: 'https://example.com/team-renamed' },
     });
-    assert.equal(urlPatch.statusCode, 501);
-    assert.equal(urlPatch.json().error.code, 'NOT_IMPLEMENTED');
+    assert.equal(urlPatch.statusCode, 200);
+    assert.equal(urlPatch.json().node.url, 'https://example.com/team-renamed');
+    assert.equal(urlPatch.json().node.identity_key, teamNode.url, 'identity_key 不因人工改地址而变');
+    assert.equal(urlPatch.json().node.has_override, true);
+
+    // 修正历史可读
+    const after = await h.app.inject({ method: 'GET', url: `/api/nodes/${teamNode.id}` });
+    const history = (after.json() as { history: Array<{ field: string; prev_value: string | null }> }).history;
+    assert.ok(history.some((h) => h.field === 'url' && h.prev_value === teamNode.url));
+    assert.ok(history.some((h) => h.field === 'alias'));
   } finally {
     await h.close();
   }
