@@ -16,6 +16,7 @@ import {
 } from '@siteatlas/shared';
 import type { DatabaseSync } from 'node:sqlite';
 import type { BrowserPool } from '../fetch/pool.ts';
+import type { MaterialsArchiver } from '../materials/archive.ts';
 import { CrawlRepo } from '../store/repos/crawl.ts';
 import { EdgesRepo } from '../store/repos/edges.ts';
 import { NodesRepo } from '../store/repos/nodes.ts';
@@ -41,6 +42,11 @@ export interface CrawlServiceDeps {
   edges: EdgesRepo;
   crawl: CrawlRepo;
   pool: BrowserPool;
+  /**
+   * 素材归档器（§6.7 三档数据）：抓到 HTML 后写 raw/ 原件与 parsed/ 解析结果。
+   * 未注入时采集照常，只是不留素材档（单元测试多数不需要）。
+   */
+  archiver?: MaterialsArchiver;
 }
 
 interface ActiveRun {
@@ -199,7 +205,7 @@ export class CrawlService {
       edges: this.deps.edges,
       pool: this.deps.pool,
       control,
-      ...(listener !== undefined ? { listener } : {}),
+      listener: this.withArchiver(listener),
     });
 
     const promise = scheduler.start().finally(() => {
@@ -249,6 +255,7 @@ export class CrawlService {
         edges: this.deps.edges,
         pool: this.deps.pool,
         control,
+        listener: this.withArchiver(undefined),
       });
       this.deps.crawl.setTaskStatus(task.id, 'running');
       const promise = scheduler.start().finally(() => {
@@ -295,6 +302,34 @@ export class CrawlService {
 
   busy(siteId: string): boolean {
     return this.runs.has(siteId);
+  }
+
+  /**
+   * 把「素材归档」和调用方传入的 listener 合成一个 listener。
+   * 归档只在拿到 HTML 时触发（含渲染回落与内容重复页），写 raw/parsed 三档数据。
+   */
+  private withArchiver(listener: CrawlListener | undefined): CrawlListener {
+    const archiver = this.deps.archiver;
+    const passthrough: CrawlListener = { ...(listener ?? {}) };
+    if (archiver === undefined) return passthrough;
+    const original = listener?.onPageFetched;
+    return {
+      ...passthrough,
+      onPageFetched: (page) => {
+        archiver.archivePage({
+          siteId: page.siteId,
+          nodeId: page.nodeId,
+          url: page.url,
+          html: page.html,
+          rendered: page.rendered,
+          httpStatus: page.httpStatus,
+          contentType: page.contentType,
+          // 原件开关跟随抓取预设的 downloadAssets（§4.4 / §6.7）
+          storeRaw: page.storeRaw,
+        });
+        original?.(page);
+      },
+    };
   }
 
   private requireRun(siteId: string): ActiveRun {

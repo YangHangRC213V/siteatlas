@@ -26,6 +26,7 @@ import type {
 } from '@siteatlas/shared';
 import type { CrawlRepo } from '../../core/store/repos/crawl.ts';
 import type { EdgesRepo } from '../../core/store/repos/edges.ts';
+import type { MaterialsRepo } from '../../core/store/repos/materials.ts';
 import type { NodesRepo } from '../../core/store/repos/nodes.ts';
 import type { SitesRepo } from '../../core/store/repos/sites.ts';
 import type { OverridesService } from '../../core/override/overrides.ts';
@@ -37,6 +38,8 @@ export interface TreeRouteDeps {
   edges: EdgesRepo;
   crawl: CrawlRepo;
   overrides: OverridesService;
+  /** 素材清单（节点详情 materials[]，dev-spec §5.1） */
+  materials: MaterialsRepo;
 }
 
 /**
@@ -197,7 +200,7 @@ export async function registerTreeRoutes(app: FastifyInstance, deps: TreeRouteDe
         node: { ...row, has_override: row.has_override },
         parents: incoming.map((edge) => ({ edge, from: overrides.effectiveNode(edge.from_id) })),
         children: outgoing.map((edge) => ({ edge, to: overrides.effectiveNode(edge.to_id) })),
-        materials: [],
+        materials: deps.materials.list(row.site_id, { nodeId: row.id, limit: 200 }),
         history: overrides.history(row.id, 50),
         depths: overrides.depths(row.site_id),
       };

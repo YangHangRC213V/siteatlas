@@ -18,6 +18,8 @@ import { registerSiteRoutes } from './routes/sites.ts';
 import { registerCrawlRoutes } from './routes/crawl.ts';
 import { registerTreeRoutes } from './routes/tree.ts';
 import { registerManualRoutes } from './routes/manual.ts';
+import { registerExportRoutes } from './routes/export.ts';
+import { registerOpenApiRoutes } from './routes/open-api.ts';
 import { CrawlBroadcaster, registerWsRoutes } from './ws.ts';
 import { registerManualWsRoutes } from './ws-manual.ts';
 import { ManualService } from '../core/manual/service.ts';
@@ -30,6 +32,9 @@ import { OverridesRepo } from '../core/store/repos/overrides.ts';
 import { EdgesRepo } from '../core/store/repos/edges.ts';
 import { NodesRepo } from '../core/store/repos/nodes.ts';
 import { SitesRepo } from '../core/store/repos/sites.ts';
+import { MaterialsRepo } from '../core/store/repos/materials.ts';
+import { ExportService } from '../core/export/service.ts';
+import { MaterialsArchiver } from '../core/materials/archive.ts';
 import { findProjectRoot } from '../core/store/paths.ts';
 import { SitesService } from '../core/sites/service.ts';
 
@@ -52,6 +57,8 @@ export interface BuiltServer {
   crawlService: CrawlService;
   overridesService: OverridesService;
   manualService: ManualService;
+  exportService: ExportService;
+  materials: MaterialsRepo;
   broadcaster: CrawlBroadcaster;
   pool: BrowserPool;
   webDistDir: string;
@@ -78,8 +85,11 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   const pool = options.pool ?? new BrowserPool();
   const service = new SitesService({ sites, nodes });
   const broadcaster = new CrawlBroadcaster();
-  const crawlService = new CrawlService({ db: options.db, sites, nodes, edges, crawl, pool });
+  const materials = new MaterialsRepo(options.db);
+  const archiver = new MaterialsArchiver({ rootDir, materials });
+  const crawlService = new CrawlService({ db: options.db, sites, nodes, edges, crawl, pool, archiver });
   const manualService = new ManualService({ db: options.db, sites, nodes, edges, pool });
+  const exportService = new ExportService({ db: options.db, rootDir });
 
   // 进程启动即复位上次遗留的 running 队列（dev-spec §6.6 断点续爬）
   const recovered = crawlService.recover();
@@ -99,8 +109,10 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   app.register(async (instance) => {
     await registerSiteRoutes(instance, service);
     await registerCrawlRoutes(instance, crawlService, broadcaster);
-    await registerTreeRoutes(instance, { sites, nodes, edges, crawl, overrides });
+    await registerTreeRoutes(instance, { sites, nodes, edges, crawl, overrides, materials });
     await registerManualRoutes(instance, manualService);
+    await registerExportRoutes(instance, { exports: exportService, materials });
+    await registerOpenApiRoutes(instance, { exports: exportService });
   });
 
   app.register(async (instance) => {
@@ -140,6 +152,8 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     crawlService,
     overridesService: overrides,
     manualService,
+    exportService,
+    materials,
     broadcaster,
     pool,
     webDistDir,

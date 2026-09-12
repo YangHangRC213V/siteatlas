@@ -35,6 +35,23 @@ export interface CrawlListener {
   onProgress?(progress: CrawlProgress): void;
   onNodeFound?(node: { id: string; url: string; depth: number; status: NodeStatus; display_label: string | null }): void;
   onTaskEnd?(status: 'done' | 'failed' | 'stopped' | 'paused', reason: string | null): void;
+  /**
+   * 页面抓取成功（含渲染回落）后的回调：素材归档的挂点（§6.7 raw/parsed 三档数据）。
+   * 只在拿到 HTML 时触发；回调抛错不影响采集。
+   */
+  onPageFetched?(page: {
+    siteId: string;
+    nodeId: string;
+    url: string;
+    html: string;
+    rendered: boolean;
+    httpStatus: number | null;
+    contentType: string | null;
+    /** 该页是否因内容指纹重复被判定为 skipped */
+    duplicate: boolean;
+    /** 是否留 HTML 原件（跟随预设 downloadAssets） */
+    storeRaw: boolean;
+  }): void;
 }
 
 export interface SchedulerOptions {
@@ -446,6 +463,7 @@ export class Scheduler {
           displayLabel: deriveDisplayLabel({ url: finalUrl, title: content.title }),
           contentHash: fingerprint,
         });
+        this.archivePage({ nodeId, url: finalUrl, html: html as string, renderMode, httpStatus, contentType, duplicate: true });
         this.broadcast();
         return {
           status: 'skipped',
@@ -471,6 +489,7 @@ export class Scheduler {
       contentHash: fingerprint,
     });
     nodes.setOutLinkCount(nodeId, links.length);
+    this.archivePage({ nodeId, url: finalUrl, html: html as string, renderMode, httpStatus, contentType, duplicate: false });
 
     // 护栏 3：前缀 Trie 剪枝
     const hit = state.prefix.recordHit(finalUrl);
@@ -611,6 +630,36 @@ export class Scheduler {
   }
 
   /** 进度广播节流：默认 400ms，force=true 立即推 */
+  /** 素材归档挂点：没配 listener.onPageFetched（M1/M2 的调用方）时是空操作 */
+  private archivePage(input: {
+    nodeId: string;
+    url: string;
+    html: string;
+    renderMode: 'http' | 'browser';
+    httpStatus: number | null;
+    contentType: string | null;
+    duplicate: boolean;
+  }): void {
+    const listener = this.options.listener;
+    if (listener?.onPageFetched === undefined) return;
+    try {
+      listener.onPageFetched({
+        siteId: this.state.siteId,
+        nodeId: input.nodeId,
+        url: input.url,
+        html: input.html,
+        rendered: input.renderMode === 'browser',
+        httpStatus: input.httpStatus,
+        contentType: input.contentType,
+        duplicate: input.duplicate,
+        storeRaw: this.preset.downloadAssets,
+      });
+    } catch (err) {
+      /* 归档失败不影响采集本身（但必须留痕，否则「素材为什么没有」无从查起） */
+      console.error('[素材归档失败]', (err as Error).message);
+    }
+  }
+
   private broadcast(force = false): void {
     const listener = this.options.listener;
     if (listener?.onProgress === undefined) return;
