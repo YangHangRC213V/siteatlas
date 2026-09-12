@@ -1,35 +1,52 @@
 /**
- * Fastify 应用装配（dev-spec §2 服务端 / §3 目录结构 / §5.1 REST）
+ * Fastify 应用装配（dev-spec §2 服务端 / §3 目录结构 / §5.1 REST / §5.2 WS）
  *
  * - REST 前缀 `/api`（内部 UI 用）
+ * - WS `/ws/sites/:id`：采集进度推送（@fastify/websocket，底层即 `ws`）
  * - 一条命令启动：server 同时托管 web 构建产物（`web/dist`），SPA 路由回落 index.html
- *   因此 /sites/:id/crawl 这类前端路由刷新后仍可用
+ *   因此 /sites/:id/crawl、/sites/:id/tree 这类前端路由刷新后仍可用
  */
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import fastifyStatic from '@fastify/static';
+import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
+import { SCHEMA_VERSION } from '@siteatlas/shared';
 import { errorHandler, apiError } from './errors.ts';
 import { registerSiteRoutes } from './routes/sites.ts';
+import { registerCrawlRoutes } from './routes/crawl.ts';
+import { registerTreeRoutes } from './routes/tree.ts';
+import { CrawlBroadcaster, registerWsRoutes } from './ws.ts';
+import { Scheduler } from '../core/crawl/scheduler.ts';
+import { CrawlService } from '../core/crawl/service.ts';
+import { BrowserPool } from '../core/fetch/pool.ts';
+import { CrawlRepo } from '../core/store/repos/crawl.ts';
+import { EdgesRepo } from '../core/store/repos/edges.ts';
 import { NodesRepo } from '../core/store/repos/nodes.ts';
 import { SitesRepo } from '../core/store/repos/sites.ts';
-import { SitesService } from '../core/sites/service.ts';
-import { SCHEMA_VERSION } from '@siteatlas/shared';
 import { findProjectRoot } from '../core/store/paths.ts';
+import { SitesService } from '../core/sites/service.ts';
 
 export interface BuildServerOptions {
   db: DatabaseSync;
-  /** 项目根目录（默认从 server/src/api/ 上溯三级） */
+  /** 项目根目录（默认自动向上查找 workspaces 根） */
   rootDir?: string;
   /** web 构建产物目录，默认 `<rootDir>/web/dist` */
   webDistDir?: string;
   logger?: boolean;
+  /** 注入浏览器池（测试用；默认惰性启动 Playwright） */
+  pool?: BrowserPool;
+  /** 注入调度器（测试用；默认真实 Scheduler） */
+  schedulerFactory?: (options: ConstructorParameters<typeof Scheduler>[0]) => Scheduler;
 }
 
 export interface BuiltServer {
   app: FastifyInstance;
   service: SitesService;
+  crawlService: CrawlService;
+  broadcaster: CrawlBroadcaster;
+  pool: BrowserPool;
   webDistDir: string;
   webDistPresent: boolean;
 }
@@ -48,17 +65,37 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
 
   const sites = new SitesRepo(options.db);
   const nodes = new NodesRepo(options.db);
+  const edges = new EdgesRepo(options.db);
+  const crawl = new CrawlRepo(options.db);
+  const pool = options.pool ?? new BrowserPool();
   const service = new SitesService({ sites, nodes });
+  const broadcaster = new CrawlBroadcaster();
+  const crawlService = new CrawlService({ db: options.db, sites, nodes, edges, crawl, pool });
+
+  // 进程启动即复位上次遗留的 running 队列（dev-spec §6.6 断点续爬）
+  const recovered = crawlService.recover();
+  if (recovered > 0) {
+    app.log.info(`断点续爬：${recovered} 个中断的队列项已复位为 pending`);
+  }
 
   app.get('/api/health', async () => ({
     ok: true,
     schemaVersion: SCHEMA_VERSION,
     webDistPresent,
+    browserAvailable: await pool.available(),
+    browserError: pool.lastLaunchError,
     now: Date.now(),
   }));
 
   app.register(async (instance) => {
     await registerSiteRoutes(instance, service);
+    await registerCrawlRoutes(instance, crawlService, broadcaster);
+    await registerTreeRoutes(instance, { sites, nodes, edges, crawl });
+  });
+
+  app.register(async (instance) => {
+    await instance.register(fastifyWebsocket);
+    await registerWsRoutes(instance, broadcaster);
   });
 
   if (webDistPresent) {
@@ -80,5 +117,10 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     return reply.code(404).send(apiError('NOT_FOUND', `无此路由：${request.method} ${request.url}`));
   });
 
-  return { app, service, webDistDir, webDistPresent };
+  app.addHook('onClose', async () => {
+    await crawlService.stopAll();
+    await pool.close();
+  });
+
+  return { app, service, crawlService, broadcaster, pool, webDistDir, webDistPresent };
 }

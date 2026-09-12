@@ -189,7 +189,190 @@ export interface ApiError {
   };
 }
 
-/** 边记录（M1+ 使用，M0 仅建表） */
+/* ------------------------------------------------------------------ *
+ * M1 采集（dev-spec §6.3 护栏 / §4 crawl_tasks·crawl_queue·fetch_logs）
+ * ------------------------------------------------------------------ */
+
+/** 渲染方式（requirements §4.4「渲染方式」） */
+export const RENDER_MODES = ['auto', 'http', 'browser'] as const;
+export type RenderMode = (typeof RENDER_MODES)[number];
+
+export const CRAWL_TASK_STATUSES = ['running', 'paused', 'done', 'failed', 'stopped'] as const;
+export type CrawlTaskStatus = (typeof CRAWL_TASK_STATUSES)[number];
+
+export const QUEUE_STATES = ['pending', 'running', 'done', 'failed', 'skipped'] as const;
+export type QueueState = (typeof QUEUE_STATES)[number];
+
+/**
+ * 抓取参数（冻结后写入 `crawl_tasks.preset_json`）
+ * 默认值取自 requirements §4.4 与 dev-spec §6.3。
+ */
+export interface CrawlPreset {
+  /** 最大深度，默认 5（§6.3 硬上限） */
+  maxDepth: number;
+  /** 最大页数，默认 100000（§6.3 硬上限） */
+  maxPages: number;
+  /** 范围策略：同域 / 同域+子域 / 跨域白名单 / 不限制（dev-spec §0） */
+  scope: SiteScope;
+  /** scope='allowlist' 时生效 */
+  allowlist: string[];
+  /** 并发数 1–32，默认 5（requirements §4.7） */
+  concurrency: number;
+  /** 每请求最小间隔（ms），默认 1000（§4.7 ≥1s/请求） */
+  minDelayMs: number;
+  /** 间隔抖动上限（ms），默认 250 */
+  jitterMs: number;
+  /** 单请求超时（ms），默认 15000 */
+  timeoutMs: number;
+  /** 失败重试次数，默认 2 */
+  maxRetries: number;
+  /** 重试退避基数（ms），默认 1000 */
+  retryBackoffMs: number;
+  /** 重试退避上限（ms），默认 30000 */
+  retryBackoffMaxMs: number;
+  /** 渲染方式：auto=静态取链接为 0 或判定 SPA 时回落 Playwright */
+  renderMode: RenderMode;
+  /** 遵守 robots.txt（§4.7 默认遵守） */
+  respectRobots: boolean;
+  /** 每域并发上限，默认 2（防压站） */
+  perHostConcurrency: number;
+  /** 自定义 UA；默认标识为工具名（§4.7） */
+  userAgent: string;
+  /** 同一 URL 访问上限，默认 3（§6.3 护栏 2） */
+  visitLimit: number;
+  /** 路径前缀连续命中阈值 → 剪枝，默认 20（§6.3 护栏 3） */
+  prefixPruneThreshold: number;
+  /** 分页模式自动页上限，默认 50（§6.3 护栏 4） */
+  paginationPageLimit: number;
+  /** 是否下载素材（图片/PDF/音视频记录但不递归；默认只存正文） */
+  downloadAssets: boolean;
+}
+
+export const DEFAULT_CRAWL_PRESET: CrawlPreset = {
+  maxDepth: 5,
+  maxPages: 100000,
+  scope: 'same_site',
+  allowlist: [],
+  concurrency: 5,
+  minDelayMs: 1000,
+  jitterMs: 250,
+  timeoutMs: 15000,
+  maxRetries: 2,
+  retryBackoffMs: 1000,
+  retryBackoffMaxMs: 30000,
+  renderMode: 'auto',
+  respectRobots: true,
+  perHostConcurrency: 2,
+  userAgent: 'SiteAtlas/0.1 (+local crawling tool)',
+  visitLimit: 3,
+  prefixPruneThreshold: 20,
+  paginationPageLimit: 50,
+  downloadAssets: false,
+};
+
+export interface CrawlTaskRecord {
+  id: string;
+  site_id: string;
+  preset_json: string;
+  status: CrawlTaskStatus;
+  stats_json: string | null;
+  started_at: number | null;
+  finished_at: number | null;
+}
+
+/** 进度与分布（GET /api/sites/:id/crawl/status） */
+export interface CrawlStats {
+  /** 已抓取完成（含失败终判） */
+  fetched: number;
+  /** 抓取成功 */
+  ok: number;
+  /** 抓取失败 */
+  failed: number;
+  /** 因护栏/范围/非 HTML 跳过 */
+  skipped: number;
+  /** 队列剩余（pending + running） */
+  queued: number;
+  /** 待重试 */
+  retrying: number;
+  /** 深度分布 */
+  depthDistribution: Record<string, number>;
+  /** 状态分布 */
+  statusCounts: Record<string, number>;
+}
+
+export interface CrawlProgress {
+  siteId: string;
+  taskId: string;
+  status: CrawlTaskStatus;
+  /** 本次任务累计抓取数 */
+  pagesFetched: number;
+  /** 新发现 URL 数 */
+  discovered: number;
+  /** 当前队列长度 */
+  queueLength: number;
+  ok: number;
+  failed: number;
+  skipped: number;
+  /** 最新事件说明（用于状态栏日志） */
+  lastEvent: string | null;
+  startedAt: number | null;
+  finishedAt: number | null;
+  now: number;
+}
+
+export interface StartCrawlRequest {
+  preset?: Partial<CrawlPreset>;
+}
+
+/** WS `/ws/sites/:id` 下行消息 */
+export type CrawlSocketMessage =
+  | { type: 'hello'; siteId: string; schemaVersion: string }
+  | { type: 'progress'; progress: CrawlProgress }
+  | { type: 'node'; node: Pick<NodeRecord, 'id' | 'url' | 'depth' | 'status' | 'display_label'> }
+  | { type: 'task'; status: CrawlTaskStatus; taskId: string }
+  | { type: 'error'; message: string };
+
+/* ---------------- 树视图（M1 只做懒加载，M2 加虚拟滚动与修正层） ---------------- */
+
+/** GET /api/sites/:id/tree 的一行（来自 v_nodes_effective，含修正标记） */
+export interface TreeNodeRow extends NodeRecord {
+  effective_parent_id: string | null;
+  /** 是否存在未撤销的人工修正（§6.4 修正徽标） */
+  has_override: number;
+  /** 直接子节点数（懒加载用） */
+  child_count: number;
+}
+
+export interface TreeResponse {
+  parentId: string | null;
+  total: number;
+  offset: number;
+  limit: number;
+  nodes: TreeNodeRow[];
+}
+
+/** 节点详情（GET /api/nodes/:id） */
+export interface NodeDetailResponse {
+  node: TreeNodeRow;
+  /** 入链（作为 to_id 的边） */
+  parents: Array<{ edge: EdgeRecord; from: NodeRecord | null }>;
+  /** 出链（作为 from_id 的边） */
+  children: Array<{ edge: EdgeRecord; to: NodeRecord | null }>;
+  materials: MaterialRecord[];
+}
+
+export interface MaterialRecord {
+  id: number;
+  site_id: string;
+  node_id: string;
+  kind: MaterialKind;
+  rel_path: string;
+  bytes: number | null;
+  sha256: string | null;
+  created_at: number;
+}
+
+/** 边记录（M1 开始写入） */
 export interface EdgeRecord {
   id: number;
   site_id: string;

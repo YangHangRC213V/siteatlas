@@ -18,8 +18,5 @@
     "dev": "npm run dev --workspaces --if-present",
     "test": "node --test \"server/src/**/*.test.ts\"",
     "typecheck": "npm run typecheck -w @siteatlas/shared && npm run typecheck -w @siteatlas/server && npm run typecheck -w @siteatlas/web"
-  },
-  "devDependencies": {
-    "playwright": "^1.63.0"
   }
 }

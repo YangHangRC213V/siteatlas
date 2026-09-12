@@ -6,6 +6,7 @@
  */
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { SiteServiceError } from '../core/sites/service.ts';
+import { CrawlError } from '../core/crawl/service.ts';
 import { InvalidUrlError } from '../core/url/normalize.ts';
 
 export interface ApiErrorBody {
@@ -26,6 +27,10 @@ export function errorHandler(
     reply
       .code(error.status)
       .send(apiError(error.code, error.message, error.detail));
+    return;
+  }
+  if (error instanceof CrawlError) {
+    reply.code(error.status).send(apiError(error.code, error.message));
     return;
   }
   if (error instanceof InvalidUrlError) {
