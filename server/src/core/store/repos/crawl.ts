@@ -5,6 +5,7 @@
 import type { CrawlPreset, CrawlStats, CrawlTaskRecord, CrawlTaskStatus, NodeStatus } from '@siteatlas/shared';
 import type { DatabaseSync } from 'node:sqlite';
 import { nowSec, ulid } from '../ids.ts';
+import { effectiveProjection } from '../effective.ts';
 
 type Row = Record<string, unknown>;
 
@@ -255,6 +256,58 @@ export class CrawlRepo {
     const depthDistribution: Record<string, number> = {};
     for (const row of depthRows) depthDistribution[String(row['depth'])] = Number(row['c']);
     return { statusCounts, depthDistribution };
+  }
+
+  /**
+   * 站点内检索候选（§5.1 GET /search 的 SQL 侧过滤）。
+   * 读有效投影（修正层叠加），因此改过别名/地址的节点也能被检索到。
+   */
+  searchNodes(
+    siteId: string,
+    filter: { depth?: number | null; status?: string | null; limit?: number },
+  ): Array<{
+    id: string;
+    url: string;
+    alias: string | null;
+    title: string | null;
+    display_label: string | null;
+    depth: number;
+    status: string;
+    effective_parent_id: string | null;
+  }> {
+    const outer: string[] = ['t.is_deleted = 0'];
+    const outerArgs: Array<string | number> = [];
+    if (filter.depth !== undefined && filter.depth !== null) {
+      outer.push('t.depth = ?');
+      outerArgs.push(filter.depth);
+    }
+    if (filter.status !== undefined && filter.status !== null) {
+      outer.push('t.status = ?');
+      outerArgs.push(filter.status);
+    }
+    const limit = Math.max(1, Math.min(20000, filter.limit ?? 5000));
+    const rows = this.db
+      .prepare(
+        `SELECT t.id, t.url, t.alias, t.title, t.display_label, t.depth, t.status, t.effective_parent_id
+         FROM (
+           SELECT ${effectiveProjection('v')}
+           FROM v_nodes_effective v WHERE v.site_id = ?
+         ) t
+         WHERE ${outer.join(' AND ')}
+         ORDER BY t.depth ASC, t.id ASC
+         LIMIT ?`,
+      )
+      .all(siteId, ...outerArgs, limit) as Row[];
+    return rows.map((r) => ({
+      id: String(r['id']),
+      url: String(r['url']),
+      alias: (r['alias'] as string | null) ?? null,
+      title: (r['title'] as string | null) ?? null,
+      display_label: (r['display_label'] as string | null) ?? null,
+      depth: Number(r['depth']),
+      status: String(r['status']),
+      effective_parent_id: (r['effective_parent_id'] as string | null) ?? null,
+    }));
   }
 
   /** 汇总本次任务的抓取结果 */

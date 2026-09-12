@@ -21,7 +21,9 @@ import { CrawlBroadcaster, registerWsRoutes } from './ws.ts';
 import { Scheduler } from '../core/crawl/scheduler.ts';
 import { CrawlService } from '../core/crawl/service.ts';
 import { BrowserPool } from '../core/fetch/pool.ts';
+import { OverridesService } from '../core/override/overrides.ts';
 import { CrawlRepo } from '../core/store/repos/crawl.ts';
+import { OverridesRepo } from '../core/store/repos/overrides.ts';
 import { EdgesRepo } from '../core/store/repos/edges.ts';
 import { NodesRepo } from '../core/store/repos/nodes.ts';
 import { SitesRepo } from '../core/store/repos/sites.ts';
@@ -45,6 +47,7 @@ export interface BuiltServer {
   app: FastifyInstance;
   service: SitesService;
   crawlService: CrawlService;
+  overridesService: OverridesService;
   broadcaster: CrawlBroadcaster;
   pool: BrowserPool;
   webDistDir: string;
@@ -67,6 +70,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   const nodes = new NodesRepo(options.db);
   const edges = new EdgesRepo(options.db);
   const crawl = new CrawlRepo(options.db);
+  const overrides = new OverridesService({ db: options.db, nodes, sites, overrides: new OverridesRepo(options.db) });
   const pool = options.pool ?? new BrowserPool();
   const service = new SitesService({ sites, nodes });
   const broadcaster = new CrawlBroadcaster();
@@ -90,7 +94,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   app.register(async (instance) => {
     await registerSiteRoutes(instance, service);
     await registerCrawlRoutes(instance, crawlService, broadcaster);
-    await registerTreeRoutes(instance, { sites, nodes, edges, crawl });
+    await registerTreeRoutes(instance, { sites, nodes, edges, crawl, overrides });
   });
 
   app.register(async (instance) => {
@@ -122,5 +126,5 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     await pool.close();
   });
 
-  return { app, service, crawlService, broadcaster, pool, webDistDir, webDistPresent };
+  return { app, service, crawlService, overridesService: overrides, broadcaster, pool, webDistDir, webDistPresent };
 }

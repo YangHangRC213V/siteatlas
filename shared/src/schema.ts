@@ -26,8 +26,13 @@ export const NODE_STATUSES = [
 ] as const;
 export type NodeStatus = (typeof NODE_STATUSES)[number];
 
-/** 修正层字段（dev-spec §4 node_overrides.field） */
-export const OVERRIDE_FIELDS = ['parent', 'url', 'alias', 'title', 'deleted', 'locked'] as const;
+/**
+ * 修正层字段（dev-spec §4 node_overrides.field）。
+ * §4 的注释以 `-- parent|url|alias|title|deleted|locked` 给出取值集合，顺序沿用；
+ * 追加 `revert`：M2 的「还原为自动结果」需要一条记录来让还原动作本身也可撤销
+ * （撤销还原 = 恢复被清掉的旧修正），语义与上述六者不同，故单独成值（见 DECISIONS.md）。
+ */
+export const OVERRIDE_FIELDS = ['parent', 'url', 'alias', 'title', 'deleted', 'locked', 'revert'] as const;
 export type OverrideField = (typeof OVERRIDE_FIELDS)[number];
 
 /** 边来源（dev-spec §4 edges.source） */
@@ -338,7 +343,7 @@ export type CrawlSocketMessage =
 export interface TreeNodeRow extends NodeRecord {
   effective_parent_id: string | null;
   /** 是否存在未撤销的人工修正（§6.4 修正徽标） */
-  has_override: number;
+  has_override: boolean;
   /** 直接子节点数（懒加载用） */
   child_count: number;
 }
@@ -351,9 +356,72 @@ export interface TreeResponse {
   nodes: TreeNodeRow[];
 }
 
+/** 修正层记录（dev-spec §4 node_overrides） */
+export interface OverrideRecord {
+  id: number;
+  site_id: string;
+  node_id: string;
+  field: OverrideField;
+  value: string | null;
+  prev_value: string | null;
+  /** 同一次用户操作（批量重挂/删子树），原子撤销依据 */
+  op_group: string | null;
+  /** 单调递增，撤销/重做栈依据 */
+  seq: number;
+  undone: number;
+  created_at: number;
+}
+
+/* ---------------- M2 修正层请求/响应 ---------------- */
+
+export interface MoveNodesRequest {
+  /** 单节点：newParentId；批量：ids[] + newParentId */
+  newParentId: string | null;
+  ids?: string[];
+}
+
+export interface MoveNodesResponse {
+  opGroup: string;
+  moved: number;
+  nodes: TreeNodeRow[];
+}
+
+export interface DeleteNodesResponse {
+  opGroup: string;
+  affectedNodes: number;
+  nodeIds: string[];
+}
+
+export interface UndoRedoResponse {
+  action: 'undo' | 'redo';
+  /** 本次影响的 override 行数 */
+  affected: number;
+  rows: OverrideRecord[];
+  nodeIds: string[];
+  undoDepth: number;
+  redoDepth: number;
+}
+
+export interface TrashEntry {
+  nodeId: string;
+  opGroup: string | null;
+  /** 被软删的子树根节点（有效形态） */
+  node: NodeRecord | null;
+  /** 该子树包含的节点数（含自身） */
+  affectedNodes: number;
+}
+
+export interface TrashResponse {
+  entries: TrashEntry[];
+}
+
 /** 节点详情（GET /api/nodes/:id） */
 export interface NodeDetailResponse {
-  node: TreeNodeRow;
+  node: TreeNodeRow & { has_override: boolean };
+  /** 修改历史（§6.4 属性面板） */
+  history: OverrideRecord[];
+  /** 撤销栈深度提示 */
+  depths: { undoDepth: number; redoDepth: number };
   /** 入链（作为 to_id 的边） */
   parents: Array<{ edge: EdgeRecord; from: NodeRecord | null }>;
   /** 出链（作为 from_id 的边） */

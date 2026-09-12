@@ -7,6 +7,7 @@
 import type { NodeRecord, NodeStatus } from '@siteatlas/shared';
 import type { DatabaseSync } from 'node:sqlite';
 import { nowSec, ulid } from '../ids.ts';
+import { effectiveProjection, hasOverrideExpr } from '../effective.ts';
 
 type Row = Record<string, unknown>;
 
@@ -54,6 +55,11 @@ export interface CreateRootNodeInput {
 }
 
 export class NodesRepo {
+  /** 行 → 契约对象（供核心外层的自定义查询复用，避免重复实现列映射） */
+  static fromRow(row: Record<string, unknown>): NodeRecord {
+    return toNode(row);
+  }
+
   private readonly db: DatabaseSync;
 
   // 同上：不使用参数属性，保持 Node 原生 TS 剥离可运行
@@ -326,7 +332,8 @@ export class NodesRepo {
     parentId: string | null,
     offset: number,
     limit: number,
-  ): { total: number; nodes: Array<NodeRecord & { effective_parent_id: string | null; has_override: number; child_count: number }> } {
+  ): { total: number; nodes: Array<NodeRecord & { effective_parent_id: string | null; has_override: boolean; child_count: number }> } {
+    // 读 v_nodes_effective（父节点叠加修正层），再叠加 url/alias/title/deleted 四类修正（§6.4）
     const where =
       parentId === null
         ? 'v.site_id = ? AND v.effective_parent_id IS NULL'
@@ -334,19 +341,29 @@ export class NodesRepo {
     const args: Array<string | number> = parentId === null ? [siteId] : [siteId, parentId];
 
     const totalRow = this.db
-      .prepare(`SELECT COUNT(*) AS c FROM v_nodes_effective v WHERE ${where} AND v.is_deleted = 0`)
+      .prepare(
+        `SELECT COUNT(*) AS c FROM (
+           SELECT ${effectiveProjection('v')} FROM v_nodes_effective v WHERE ${where}
+         ) t WHERE t.is_deleted = 0`,
+      )
       .get(...args) as Row;
 
     const rows = this.db
       .prepare(
-        `SELECT v.*,
-                (SELECT COUNT(*) FROM node_overrides o
-                  WHERE o.node_id = v.id AND o.field = 'parent' AND o.undone = 0) AS has_override,
+        `SELECT t.*,
                 (SELECT COUNT(*) FROM v_nodes_effective c
-                  WHERE c.site_id = v.site_id AND c.effective_parent_id = v.id AND c.is_deleted = 0) AS child_count
-         FROM v_nodes_effective v
-         WHERE ${where} AND v.is_deleted = 0
-         ORDER BY v.depth ASC, v.id ASC
+                  WHERE c.site_id = t.site_id AND c.effective_parent_id = t.id
+                    AND c.is_deleted = 0
+                    AND NOT EXISTS (SELECT 1 FROM node_overrides od
+                                    WHERE od.node_id = c.id AND od.field = 'deleted' AND od.undone = 0 AND od.value = '1')
+                ) AS child_count
+         FROM (
+           SELECT ${effectiveProjection('v')},
+                  ${hasOverrideExpr('v')} AS has_override
+           FROM v_nodes_effective v WHERE ${where}
+         ) t
+         WHERE t.is_deleted = 0
+         ORDER BY t.depth ASC, t.id ASC
          LIMIT ? OFFSET ?`,
       )
       .all(...args, limit, offset) as Row[];
@@ -354,12 +371,12 @@ export class NodesRepo {
     return {
       total: Number(totalRow['c'] ?? 0),
       nodes: rows.map((r) => {
-        const node = toNode(r) as NodeRecord & {
+        const node = toNode(r) as unknown as NodeRecord & {
           effective_parent_id: string | null;
-          has_override: number;
+          has_override: boolean;
           child_count: number;
         };
-        // 懒加载计数来自子查询，必须显式回填（toNode 只认表列）
+        node.has_override = Number(r['has_override'] ?? 0) > 0;
         node.child_count = Number(r['child_count'] ?? 0);
         return node;
       }),
