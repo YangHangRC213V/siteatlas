@@ -114,6 +114,8 @@ export interface ManualSessionDeps {
   deliverFrame?: (frame: { data: string; width: number; height: number }) => void;
   onEvent?: (event: ManualEvent) => void;
   onPendingConfirm?: (item: PendingConfirm) => void;
+  /** 待确认队列「内容变化」回调（增/删都触发）：WS 层据此把整份队列推给前端 */
+  onPendingChanged?: (items: PendingConfirm[]) => void;
   onIdentity?: (identity: ManualIdentity) => void;
 }
 
@@ -226,9 +228,34 @@ export class ManualSession {
 
   /** 节流窗口结束后把待投递的最新帧推出去（由 WS 层定时调用） */
   flushFrame(): void {
-    if (this.closed || !this.pump.hasPending) return;
+    if (this.closed) return;
+    // 顺便把「过了配对窗口仍未发生导航」的点击落到待确认队列
+    this.promoteExpiredClicks();
+    if (!this.pump.hasPending) return;
     const frame = this.pump.takeLatest();
     if (frame !== null) this.deps.deliverFrame?.(frame);
+  }
+
+  /**
+   * 配对窗口内没有导航的点击 → 待确认队列（dev-spec §6.5「未触发导航的点击单独标记，确认后再入树」）。
+   * 没有这一步，带 href 但被 JS 拦截 / 只改 hash 的点击会安静消失，
+   * 界面上的「待确认」永远是 0（踩过的坑，见 DECISIONS.md M3）。
+   */
+  private promoteExpiredClicks(): void {
+    if (this.status !== 'running') return;
+    const expired = this.queue.takeExpired();
+    for (const click of expired) {
+      const href = click.payload.href;
+      this.pushPendingConfirm({
+        id: this.randomId(),
+        payload: click.payload,
+        fromNodeId: click.fromNodeId,
+        fromUrl: click.fromUrl,
+        candidateUrl: href === null ? null : (this.safeNormalize(href)?.url ?? null),
+        reason: href === null ? '点击未触发导航' : '点击未触发导航（可能是页内锚点或 JS 行为）',
+        at: this.now(),
+      });
+    }
   }
 
   /* ---------------- 导航与身份 ---------------- */
@@ -472,6 +499,7 @@ export class ManualSession {
     while (this.pendingConfirm.length > 100) this.pendingConfirm.shift();
     this.emit('warn', `待确认：${item.reason}（${item.payload.anchorText.slice(0, 30) || item.payload.tag}）`);
     this.deps.onPendingConfirm?.(item);
+    this.deps.onPendingChanged?.(this.listPendingConfirm());
   }
 
   listPendingConfirm(): PendingConfirm[] {
@@ -488,6 +516,7 @@ export class ManualSession {
     this.linkEdge({ fromNodeId: item.fromNodeId, toNodeId: target.id, payload: item.payload, href: target.url });
     this.pendingConfirm.splice(index, 1);
     this.emit('info', `人工确认：${item.payload.anchorText.slice(0, 30)} → ${target.display_label ?? target.url}`);
+    this.deps.onPendingChanged?.(this.listPendingConfirm());
     return { ok: true, message: '已按人工确认记录边' };
   }
 
@@ -496,6 +525,7 @@ export class ManualSession {
     if (index < 0) return { ok: false };
     this.pendingConfirm.splice(index, 1);
     this.emit('info', '已丢弃该待确认项');
+    this.deps.onPendingChanged?.(this.listPendingConfirm());
     return { ok: true };
   }
 
@@ -568,6 +598,11 @@ export class ManualSession {
   async dispatchKey(input: KeyInput): Promise<void> {
     if (this.pageSession === null) return;
     await this.pageSession.dispatchKey(input);
+  }
+
+  /** 读远端页面里某个元素的位置（用于自动化验收与「点这里」的坐标提示） */
+  async elementBox(selector: string): Promise<{ x: number; y: number; width: number; height: number } | null> {
+    return (await this.pageSession?.elementBox(selector)) ?? null;
   }
 
   /* ---------------- 状态与收尾 ---------------- */

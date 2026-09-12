@@ -180,6 +180,11 @@ export class PendingClickQueue {
     return expired;
   }
 
+  /** 取出「已过配对窗口仍没有导航」的点击（把它们挪出队列，记为未配对） */
+  takeExpired(at: number = this.now()): PendingClick[] {
+    return this.sweep(at);
+  }
+
   get pending(): PendingClick[] {
     return [...this.items];
   }

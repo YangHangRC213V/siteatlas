@@ -92,6 +92,17 @@ export async function registerManualRoutes(app: FastifyInstance, service: Manual
     },
   );
 
+  // 远端元素位置（手动采集的自动化验收/调试用：拿到坐标就能在 canvas 上点准）
+  app.get<{ Params: { sessionId: string }; Querystring: { selector?: string } }>(
+    '/api/manual/:sessionId/element',
+    async (request) => {
+      const entry = service.require(request.params.sessionId);
+      const selector = request.query.selector ?? 'a[href]';
+      const box = await entry.session.elementBox(selector);
+      return { selector, box };
+    },
+  );
+
   app.post<{ Params: { sessionId: string } }>('/api/manual/:sessionId/stop', async (request) => {
     const state = await service.stop(request.params.sessionId);
     if (state === null) throw new ManualError('SESSION_NOT_FOUND', `手动会话不存在：${request.params.sessionId}`, 404);

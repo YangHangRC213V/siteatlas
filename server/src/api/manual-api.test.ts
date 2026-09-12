@@ -45,10 +45,11 @@ async function makeHarness(): Promise<Harness> {
   Object.defineProperty(service, 'deps', {
     value: {
       ...(manual.deps as Record<string, unknown>),
-      createPageSession: async (options: { handlers?: PageSessionHandlers }) => {
+      createPageSession: async (options: { handlers?: PageSessionHandlers; pairingWindowMs?: number }) => {
         const page = new FakePageSession({
           id: 'fake-1',
           ...(options.handlers !== undefined ? { handlers: options.handlers } : {}),
+          ...(options.pairingWindowMs !== undefined ? { pairingWindowMs: options.pairingWindowMs } : {}),
         });
         pages.push(page);
         return page;
@@ -105,6 +106,12 @@ test('M3 REST：开始手动会话 → 状态 → 停止；浏览器不可用时
     assert.equal(state.guideEnabled, true);
     assert.equal(h.pages.length, 1, '应创建一个浏览器页面会话');
     assert.equal(h.pages[0]?.screencastStarted, true, '应启动画面串流');
+    // 回归：不带 url 时也要打开起始节点 URL —— 否则页面停在 about:blank，
+    // 画面空白且 elementBox 永远查不到元素（e2e 一度卡在这里）
+    const siteDetail = await h.app.inject({ method: 'GET', url: `/api/sites/${h.siteId}` });
+    const rootUrl = (siteDetail.json() as { site: { root_url: string } }).site.root_url;
+    assert.equal(h.pages[0]?.currentUrl(), rootUrl, '不带 url 应默认打开根 URL');
+    assert.deepEqual(h.pages[0]?.navigationHistory, [rootUrl]);
 
     // 同站点重复开始 → 409
     const again = await h.app.inject({ method: 'POST', url: `/api/sites/${h.siteId}/manual`, payload: {} });
@@ -222,8 +229,49 @@ test('M3 WS：下行帧/状态，上行鼠标与键盘折成 CDP Input.*，点�
   }
 });
 
-test('M3 WS：不存在的会话回 error 帧而非崩溃', async () => {
+test('M3 WS：未配对点击 → 服务端主动推整份待确认队列（pending-list）', async () => {
   const h = await makeHarness();
+  try {
+    // 直接调服务并缩短配对窗口到 300ms：让「未配对点击」快速进待确认队列（真实默认 4s；
+    // 注入参数只对内部调用开放，REST 路由不做这个字段，避免把测试口子开到对外契约上）
+    const started = await h.manual.start({ siteId: h.siteId, pairingWindowMs: 300 });
+    const sessionId = started.state.sessionId;
+
+    await h.app.listen({ port: 0, host: '127.0.0.1' });
+    const address = h.app.server.address();
+    assert.ok(address !== null && typeof address === 'object');
+    const messages: Array<Record<string, unknown>> = [];
+    const socket = new WebSocket(`ws://127.0.0.1:${address.port}/ws/manual/${sessionId}`);
+    socket.on('message', (data) => messages.push(JSON.parse(String(data)) as Record<string, unknown>));
+    await new Promise<void>((resolve, reject) => {
+      socket.on('open', () => resolve());
+      socket.on('error', reject);
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    // 连接时先给一份（可能为空）队列快照
+    assert.ok(messages.some((m) => m['type'] === 'pending-list'), '连接后应收到队列快照');
+
+    // 页内锚点式点击：无导航 → 进待确认队列 → 服务端必须主动推
+    h.pages[0]?.pushClick({ href: `${h.site.origin}/#anchor`, anchorText: '页内锚点', selector: 'main > a' });
+    await new Promise((r) => setTimeout(r, 900));
+
+    const lists = messages.filter((m) => m['type'] === 'pending-list');
+    const last = lists.at(-1)?.['items'] as Array<{ reason: string; payload: { anchorText: string } }> | undefined;
+    assert.ok(lists.length >= 2, `队列变化应再推一次，实际 ${lists.length} 次`);
+    assert.equal(last?.length, 1, '推的应是整份队列（1 条待确认）');
+    assert.equal(last?.[0]?.payload.anchorText, '页内锚点');
+    // 同时推更新的 state，计数跟着走（界面上的「待确认（n）」用的就是这个）
+    const lastState = [...messages].reverse().find((m) => m['type'] === 'state');
+    assert.equal((lastState?.['state'] as { pendingConfirmCount: number }).pendingConfirmCount, 1);
+
+    socket.close();
+    await new Promise((r) => setTimeout(r, 100));
+  } finally {
+    await h.close();
+  }
+});
+
+test('M3 WS：不存在的会话回 error 帧而非崩溃', async () => {  const h = await makeHarness();
   try {
     await h.app.listen({ port: 0, host: '127.0.0.1' });
     const address = h.app.server.address();

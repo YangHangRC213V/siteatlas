@@ -72,6 +72,8 @@ export interface PageSession {
   startScreencast(options?: { quality?: number; maxWidth?: number; maxHeight?: number }): Promise<void>;
   stopScreencast(): Promise<void>;
   dispatchMouse(input: MouseInput): Promise<void>;
+  /** 读取元素在页面视口中的位置（手动采集端到端验收需要知道"点哪里"） */
+  elementBox(selector: string): Promise<{ x: number; y: number; width: number; height: number } | null>;
   dispatchKey(input: KeyInput): Promise<void>;
   screenshot(): Promise<{ data: string; contentType: string }>;
   close(): Promise<void>;
@@ -270,6 +272,29 @@ export class ChromiumPageSession implements PageSession {
     if (this.cdp === null || !this.screencasting) return;
     await this.cdp.send('Page.stopScreencast');
     this.screencasting = false;
+  }
+
+  async elementBox(selector: string): Promise<{ x: number; y: number; width: number; height: number } | null> {
+    if (this.cdp === null) return null;
+    const expression = `(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2, width: r.width, height: r.height };
+    })()`;
+    const result = (await this.cdp.send('Runtime.evaluate', { expression, returnByValue: true })) as {
+      result?: { value?: unknown };
+    };
+    const value = result.result?.value;
+    if (value === null || typeof value !== 'object') return null;
+    const box = value as { x?: unknown; y?: unknown; width?: unknown; height?: unknown };
+    if (typeof box.x !== 'number' || typeof box.y !== 'number') return null;
+    return {
+      x: box.x,
+      y: box.y,
+      width: typeof box.width === 'number' ? box.width : 0,
+      height: typeof box.height === 'number' ? box.height : 0,
+    };
   }
 
   async dispatchMouse(input: MouseInput): Promise<void> {

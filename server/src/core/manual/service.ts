@@ -54,6 +54,8 @@ interface ActiveManual {
   session: ManualSession;
   page: PageSession | null;
   deliverFrame: ((frame: { data: string; width: number; height: number }) => void) | null;
+  /** 待确认队列变化时的投递回调（WS 层订阅后把整份队列推给前端） */
+  deliverPending: ((items: PendingConfirm[]) => void) | null;
   frameTimer: ReturnType<typeof setInterval> | null;
 }
 
@@ -63,6 +65,8 @@ export interface StartManualOptions {
   url?: string;
   viewport?: { width: number; height: number };
   progressMode?: 'record-only' | 'record-and-expand';
+  /** 点击↔导航配对窗口（默认 4000ms；测试注入小值以快速产出待确认项） */
+  pairingWindowMs?: number;
   onEvent?: (event: ManualEvent) => void;
   onPendingConfirm?: (item: PendingConfirm) => void;
   onIdentity?: (identity: NonNullable<ManualSessionState['current']>) => void;
@@ -125,12 +129,15 @@ export class ManualService {
       startNodeId,
       ...(options.onEvent !== undefined ? { onEvent: options.onEvent } : {}),
       ...(options.onPendingConfirm !== undefined ? { onPendingConfirm: options.onPendingConfirm } : {}),
+      // 队列增删都推给订阅者（WS）
+      onPendingChanged: (items) => this.sessions.get(session.id)?.deliverPending?.(items),
+      ...(options.pairingWindowMs !== undefined ? { pairingWindowMs: options.pairingWindowMs } : {}),
       ...(options.onIdentity !== undefined ? { onIdentity: options.onIdentity } : {}),
       deliverFrame: (frame) => this.sessions.get(session.id)?.deliverFrame?.(frame),
     });
     if (options.progressMode !== undefined) session.setProgressMode(options.progressMode);
 
-    const entry: ActiveManual = { session, page: null, deliverFrame: null, frameTimer: null };
+    const entry: ActiveManual = { session, page: null, deliverFrame: null, deliverPending: null, frameTimer: null };
     this.sessions.set(session.id, entry);
 
     // 打开浏览器页面（不可用则回滚，不留半死会话）
@@ -162,7 +169,9 @@ export class ManualService {
       );
     }
 
-    await session.start(options.url);
+    // 不带 url 时默认打开起始节点的 URL：否则页面停在 about:blank，
+    // 而「当前页」身份已是起始节点 —— 表现为画面空白 + 点不到任何元素（见 DECISIONS.md M3）。
+    await session.start(options.url ?? startNode.url);
     return { session, state: session.state() };
   }
 
@@ -193,6 +202,14 @@ export class ManualService {
     const entry = this.sessions.get(sessionId);
     if (entry === undefined) return false;
     entry.deliverFrame = deliver;
+    return true;
+  }
+
+  /** WS 订阅待确认队列：注册投递回调（整份队列，前端直接替换） */
+  setPendingListener(sessionId: string, deliver: ((items: PendingConfirm[]) => void) | null): boolean {
+    const entry = this.sessions.get(sessionId);
+    if (entry === undefined) return false;
+    entry.deliverPending = deliver;
     return true;
   }
 

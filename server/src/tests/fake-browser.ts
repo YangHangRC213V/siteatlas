@@ -15,6 +15,8 @@ export interface FakePageSessionOptions {
   now?: () => number;
   /** 导航失败清单（URL → 错误信息） */
   failures?: Record<string, string>;
+  /** 元素位置脚本（selector → box），供 elementBox 使用 */
+  elementBoxes?: Record<string, { x: number; y: number; width: number; height: number }>;
   /** 每次导航后的实际 URL（用于模拟重定向），默认等于请求 URL */
   redirects?: Record<string, string>;
 }
@@ -34,6 +36,7 @@ export class FakePageSession implements PageSession {
   private readonly failures: Record<string, string>;
   private readonly redirects: Record<string, string>;
   private readonly now: () => number;
+  private readonly elementBoxes: Record<string, { x: number; y: number; width: number; height: number }>;
   private currentUrlValue = 'about:blank';
 
   constructor(options: FakePageSessionOptions = {}) {
@@ -43,6 +46,7 @@ export class FakePageSession implements PageSession {
     this.failures = options.failures ?? {};
     this.redirects = options.redirects ?? {};
     this.now = options.now ?? (() => Date.now());
+    this.elementBoxes = options.elementBoxes ?? {};
   }
 
   currentUrl(): string {
@@ -81,6 +85,11 @@ export class FakePageSession implements PageSession {
 
   async dispatchKey(input: KeyInput): Promise<void> {
     this.keyEvents.push(input);
+  }
+
+  /** 假会话：按脚本返回元素位置（默认给一个固定坐标） */
+  async elementBox(selector: string): Promise<{ x: number; y: number; width: number; height: number } | null> {
+    return this.elementBoxes[selector] ?? { x: 100, y: 100, width: 80, height: 20 };
   }
 
   async screenshot(): Promise<{ data: string; contentType: string }> {

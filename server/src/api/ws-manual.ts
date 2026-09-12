@@ -26,6 +26,7 @@ export type ManualDownstream =
   | { type: 'frame'; data: string; width: number; height: number; at: number }
   | { type: 'state'; state: ManualSessionState }
   | { type: 'pending'; item: PendingConfirm }
+  | { type: 'pending-list'; items: PendingConfirm[] }
   | { type: 'event'; event: ManualEvent }
   | { type: 'identity'; identity: ManualIdentity }
   | { type: 'error'; code: string; message: string };
@@ -82,6 +83,13 @@ export async function registerManualWsRoutes(app: FastifyInstance, service: Manu
       send({ type: 'frame', data: frame.data, width: frame.width, height: frame.height, at: Date.now() });
     });
 
+    // 订阅待确认队列：队列变化必须主动推 —— 否则「页面里的点击」只写进服务端队列，
+    // 界面上的待确认列表与计数一直停在 0（踩过的坑，见 DECISIONS.md M3）
+    service.setPendingListener(sessionId, (items) => {
+      send({ type: 'pending-list', items });
+      send({ type: 'state', state: session.state() });
+    });
+
     send({
       type: 'hello',
       sessionId,
@@ -89,7 +97,7 @@ export async function registerManualWsRoutes(app: FastifyInstance, service: Manu
       viewport: session.pageViewport(),
     });
     send({ type: 'state', state: session.state() });
-    for (const item of session.listPendingConfirm()) send({ type: 'pending', item });
+    send({ type: 'pending-list', items: session.listPendingConfirm() });
 
     s.on('message', (raw: unknown) => {
       void (async (): Promise<void> => {
@@ -155,11 +163,11 @@ export async function registerManualWsRoutes(app: FastifyInstance, service: Manu
       })();
     });
 
-    s.on('close', () => {
+    const detach = (): void => {
       service.setFrameSink(sessionId, null);
-    });
-    s.on('error', () => {
-      service.setFrameSink(sessionId, null);
-    });
+      service.setPendingListener(sessionId, null);
+    };
+    s.on('close', detach);
+    s.on('error', detach);
   });
 }
