@@ -257,6 +257,16 @@ export class NodesRepo {
       );
   }
 
+  /**
+   * 人工直接改写自动投影父节点（M3 手动采集的「置为父节点」兜底）。
+   * 与 M2 的 node_overrides 修正层不同：这是把「自动结果」本身改掉，
+   * 因为手动采集时用户是在**创造**自动层（而不是修正已有结果）。
+   * 调用方需自行做防环校验并写 manual_overrides 痕迹。
+   */
+  applyAutoParent(nodeId: string, parentId: string | null): void {
+    this.db.prepare('UPDATE nodes SET auto_parent_id = ? WHERE id = ?').run(parentId, nodeId);
+  }
+
   /** 出链数回写（每抓一页写一次，避免逐边自增） */
   setOutLinkCount(id: string, count: number): void {
     this.db.prepare('UPDATE nodes SET out_link_count = ? WHERE id = ?').run(count, id);

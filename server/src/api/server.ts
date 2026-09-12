@@ -17,7 +17,10 @@ import { errorHandler, apiError } from './errors.ts';
 import { registerSiteRoutes } from './routes/sites.ts';
 import { registerCrawlRoutes } from './routes/crawl.ts';
 import { registerTreeRoutes } from './routes/tree.ts';
+import { registerManualRoutes } from './routes/manual.ts';
 import { CrawlBroadcaster, registerWsRoutes } from './ws.ts';
+import { registerManualWsRoutes } from './ws-manual.ts';
+import { ManualService } from '../core/manual/service.ts';
 import { Scheduler } from '../core/crawl/scheduler.ts';
 import { CrawlService } from '../core/crawl/service.ts';
 import { BrowserPool } from '../core/fetch/pool.ts';
@@ -48,6 +51,7 @@ export interface BuiltServer {
   service: SitesService;
   crawlService: CrawlService;
   overridesService: OverridesService;
+  manualService: ManualService;
   broadcaster: CrawlBroadcaster;
   pool: BrowserPool;
   webDistDir: string;
@@ -75,6 +79,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   const service = new SitesService({ sites, nodes });
   const broadcaster = new CrawlBroadcaster();
   const crawlService = new CrawlService({ db: options.db, sites, nodes, edges, crawl, pool });
+  const manualService = new ManualService({ db: options.db, sites, nodes, edges, pool });
 
   // 进程启动即复位上次遗留的 running 队列（dev-spec §6.6 断点续爬）
   const recovered = crawlService.recover();
@@ -95,11 +100,13 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     await registerSiteRoutes(instance, service);
     await registerCrawlRoutes(instance, crawlService, broadcaster);
     await registerTreeRoutes(instance, { sites, nodes, edges, crawl, overrides });
+    await registerManualRoutes(instance, manualService);
   });
 
   app.register(async (instance) => {
     await instance.register(fastifyWebsocket);
     await registerWsRoutes(instance, broadcaster);
+    await registerManualWsRoutes(instance, manualService);
   });
 
   if (webDistPresent) {
@@ -122,9 +129,20 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   });
 
   app.addHook('onClose', async () => {
+    await manualService.stopAll();
     await crawlService.stopAll();
     await pool.close();
   });
 
-  return { app, service, crawlService, overridesService: overrides, broadcaster, pool, webDistDir, webDistPresent };
+  return {
+    app,
+    service,
+    crawlService,
+    overridesService: overrides,
+    manualService,
+    broadcaster,
+    pool,
+    webDistDir,
+    webDistPresent,
+  };
 }

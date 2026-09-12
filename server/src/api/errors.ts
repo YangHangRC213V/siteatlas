@@ -8,6 +8,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { SiteServiceError } from '../core/sites/service.ts';
 import { CrawlControlError } from '../core/crawl/control.ts';
 import { OverrideError } from '../core/override/overrides.ts';
+import { ManualError } from '../core/manual/service.ts';
 import { CrawlError } from '../core/crawl/service.ts';
 import { InvalidUrlError } from '../core/url/normalize.ts';
 
@@ -40,6 +41,10 @@ export function errorHandler(
     return;
   }
   if (error instanceof OverrideError) {
+    reply.code(error.status).send(apiError(error.code, error.message));
+    return;
+  }
+  if (error instanceof ManualError) {
     reply.code(error.status).send(apiError(error.code, error.message));
     return;
   }
