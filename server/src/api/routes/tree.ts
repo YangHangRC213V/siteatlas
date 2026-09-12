@@ -22,33 +22,40 @@ export interface TreeRouteDeps {
   crawl: CrawlRepo;
 }
 
-const nodeRowSchema = {
-  type: 'object',
-  additionalProperties: true,
-  properties: {
-    id: { type: 'string' },
-    site_id: { type: 'string' },
-    identity_key: { type: 'string' },
-    url: { type: 'string' },
-    alias: { type: ['string', 'null'] },
-    display_label: { type: ['string', 'null'] },
-    title: { type: ['string', 'null'] },
-    http_status: { type: ['integer', 'null'] },
-    content_type: { type: ['string', 'null'] },
-    depth: { type: 'integer' },
-    auto_parent_id: { type: ['string', 'null'] },
-    effective_parent_id: { type: ['string', 'null'] },
-    status: { type: 'string' },
-    content_hash: { type: ['string', 'null'] },
-    in_link_count: { type: 'integer' },
-    out_link_count: { type: 'integer' },
-    is_deleted: { type: 'integer' },
-    first_seen_at: { type: 'integer' },
-    last_fetch_at: { type: ['integer', 'null'] },
-    has_override: { type: 'integer' },
-    child_count: { type: 'integer' },
-  },
-} as const;
+/**
+ * 树接口的节点行 schema：v_nodes_effective 投影 + 懒加载计数。
+ * 用工厂函数构造（不用对象展开），保证传给 fast-json-stringify 的是全新普通对象，
+ * 避免只读展开导致字段被序列化裁掉。
+ */
+function makeTreeNodeSchema(): Record<string, unknown> {
+  return {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      id: { type: 'string' },
+      site_id: { type: 'string' },
+      identity_key: { type: 'string' },
+      url: { type: 'string' },
+      alias: { type: ['string', 'null'] },
+      display_label: { type: ['string', 'null'] },
+      title: { type: ['string', 'null'] },
+      http_status: { type: ['integer', 'null'] },
+      content_type: { type: ['string', 'null'] },
+      depth: { type: 'integer' },
+      auto_parent_id: { type: ['string', 'null'] },
+      effective_parent_id: { type: ['string', 'null'] },
+      status: { type: 'string' },
+      content_hash: { type: ['string', 'null'] },
+      in_link_count: { type: 'integer' },
+      out_link_count: { type: 'integer' },
+      is_deleted: { type: 'integer' },
+      first_seen_at: { type: 'integer' },
+      last_fetch_at: { type: ['integer', 'null'] },
+      has_override: { type: 'integer' },
+      child_count: { type: 'integer' },
+    },
+  };
+}
 
 export async function registerTreeRoutes(app: FastifyInstance, deps: TreeRouteDeps): Promise<void> {
   app.get<{ Params: { id: string }; Querystring: { parentId?: string; offset?: string; limit?: string } }>(
@@ -74,7 +81,7 @@ export async function registerTreeRoutes(app: FastifyInstance, deps: TreeRouteDe
               total: { type: 'integer' },
               offset: { type: 'integer' },
               limit: { type: 'integer' },
-              nodes: { type: 'array', items: nodeRowSchema },
+              nodes: { type: 'array', items: makeTreeNodeSchema() },
             },
           },
         },

@@ -6,6 +6,18 @@ export const STOPPED_ERROR = 'CRAWL_STOPPED';
 
 export type ControlState = 'running' | 'paused' | 'stopped';
 
+/** 控制层错误：api 层映射为 409（不依赖 service.ts，避免循环依赖） */
+export class CrawlControlError extends Error {
+  readonly code: string;
+  readonly status: number;
+  constructor(code: string, message: string, status = 409) {
+    super(message);
+    this.name = 'CrawlControlError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
 export class CrawlControl {
   private state: ControlState = 'running';
   private readonly controller = new AbortController();
@@ -33,7 +45,9 @@ export class CrawlControl {
   }
 
   resume(): void {
-    if (this.state === 'stopped') throw new Error('任务已停止，无法继续');
+    if (this.state === 'stopped') {
+      throw new CrawlControlError('CRAWL_NOT_RUNNING', '任务已停止，无法继续');
+    }
     if (this.state === 'paused') {
       if (this.pausedAt !== null) this.totalPausedMs += Date.now() - this.pausedAt;
       this.pausedAt = null;

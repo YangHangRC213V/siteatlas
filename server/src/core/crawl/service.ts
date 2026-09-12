@@ -263,11 +263,14 @@ export class CrawlService {
     return this.requireTask(run.taskId);
   }
 
-  stop(siteId: string): CrawlTaskRecord {
+  /** 停止并等待收尾：接口返回时任务已终结、站点不再 busy */
+  async stop(siteId: string): Promise<CrawlTaskRecord> {
     const run = this.requireRun(siteId);
     run.control.stop();
     this.deps.crawl.releaseRunning(run.taskId);
     this.deps.crawl.setTaskStatus(run.taskId, 'stopped');
+    await run.promise.catch(() => undefined);
+    if (this.runs.get(siteId)?.taskId === run.taskId) this.runs.delete(siteId);
     return this.requireTask(run.taskId);
   }
 

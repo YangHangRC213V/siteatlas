@@ -339,11 +339,11 @@ test('M1：停止后任务终结、队列 running 归零（可续跑）', async 
     h.crawlService.start(siteId, { ...FAST_PRESET, concurrency: 1, perHostConcurrency: 1, minDelayMs: 1000 });
     await new Promise((r) => setTimeout(r, 200));
 
-    const stopped = h.crawlService.stop(siteId);
+    // stop 会等待收尾：返回后任务已终结、站点不再 busy
+    const stopped = await h.crawlService.stop(siteId);
     assert.equal(stopped.status, 'stopped');
-    const result = await h.crawlService.wait(siteId);
-    assert.equal(result?.status, 'stopped');
     assert.equal(h.crawlService.busy(siteId), false, '任务结束后不再占用站点');
+    assert.equal(await h.crawlService.wait(siteId), null, '没有活动运行时 wait 返回 null');
 
     const counts = h.crawl.queueCounts(stopped.id);
     assert.equal(counts['running'], 0, 'running 应被释放');

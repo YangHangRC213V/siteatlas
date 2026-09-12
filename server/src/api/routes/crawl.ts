@@ -101,7 +101,7 @@ export async function registerCrawlRoutes(
             ? service.pause(request.params.id)
             : action === 'resume'
               ? service.resume(request.params.id)
-              : service.stop(request.params.id);
+              : await service.stop(request.params.id);
         broadcaster.broadcast(request.params.id, { type: 'task', status: task.status, taskId: task.id });
         return { task };
       },

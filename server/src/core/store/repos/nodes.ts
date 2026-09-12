@@ -353,10 +353,15 @@ export class NodesRepo {
 
     return {
       total: Number(totalRow['c'] ?? 0),
-      nodes: rows.map((r) => toNode(r) as NodeRecord & {
-        effective_parent_id: string | null;
-        has_override: number;
-        child_count: number;
+      nodes: rows.map((r) => {
+        const node = toNode(r) as NodeRecord & {
+          effective_parent_id: string | null;
+          has_override: number;
+          child_count: number;
+        };
+        // 懒加载计数来自子查询，必须显式回填（toNode 只认表列）
+        node.child_count = Number(r['child_count'] ?? 0);
+        return node;
       }),
     };
   }
