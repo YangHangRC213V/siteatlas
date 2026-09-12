@@ -74,10 +74,10 @@ test('迁移幂等：第二次执行全部跳过，不重复建表', () => {
   const handle = openDb({ file: ':memory:', runMigrations: false });
   try {
     const first = migrate(handle.db);
-    assert.deepEqual(first.applied, ['001_init', '002_override_operations', '003_manual_overrides']);
+    assert.deepEqual(first.applied, ['001_init', '002_override_operations', '003_manual_overrides', '004_export_records']);
     const second = migrate(handle.db);
     assert.deepEqual(second.applied, []);
-    assert.deepEqual(second.skipped, ['001_init', '002_override_operations', '003_manual_overrides']);
+    assert.deepEqual(second.skipped, ['001_init', '002_override_operations', '003_manual_overrides', '004_export_records']);
   } finally {
     handle.close();
   }
