@@ -89,6 +89,7 @@ export type ManualUpstreamMessage =
   | { type: 'navigate'; url: string }
   | { type: 'back-root' }
   | { type: 'back-parent' }
+  | { type: 'expand' }
   | { type: 'set-root' }
   | { type: 'set-parent'; nodeId: string }
   | { type: 'mode'; mode: 'record-only' | 'record-and-expand' }

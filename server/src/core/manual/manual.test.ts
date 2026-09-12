@@ -263,6 +263,49 @@ test('M3 人工指定：以当前页为根 / 置为父节点（防环）+ 痕迹
   }
 });
 
+test('M3 展开一层：在当前页下建占位节点 + 建边 + 导航过去，且不重复', async () => {
+  const h = await makeHarness();
+  try {
+    const { session, page } = h.makeSession();
+    await session.start();
+
+    page.pushClick({ href: 'http://t.local/a', anchorText: 'A' });
+    page.pushNavigation('http://t.local/a');
+    const aId = session.state().current?.nodeId as string;
+
+    const before = h.handle.db.prepare('SELECT COUNT(*) AS c FROM nodes WHERE site_id = ?').get(h.siteId) as { c: number };
+    const expanded = await session.expandOneLevel();
+    assert.equal(expanded.ok, true, expanded.message);
+    assert.equal(expanded.url, 'http://t.local/a/siteatlas-expand/1');
+    assert.equal(session.state().current?.nodeId, expanded.nodeId, '展开后应导航过去（身份切到新节点）');
+    assert.equal(page.navigationHistory.at(-1), 'http://t.local/a/siteatlas-expand/1');
+
+    const after = h.handle.db.prepare('SELECT COUNT(*) AS c FROM nodes WHERE site_id = ?').get(h.siteId) as { c: number };
+    assert.equal(after.c, before.c + 1, '展开一层应新建 1 个节点');
+
+    const node = h.nodes.get(expanded.nodeId as string);
+    assert.equal(node?.auto_parent_id, aId, '新节点应挂在展开前的当前页下');
+    assert.equal(node?.status, 'need_human', '占位地址不是真实页面，标记为待人工处理');
+    const edgeCount = h.handle.db
+      .prepare("SELECT COUNT(*) AS c FROM edges WHERE site_id = ? AND from_id = ? AND to_id = ?")
+      .get(h.siteId, aId, expanded.nodeId) as { c: number };
+    assert.equal(edgeCount.c, 1, '展开应同时建一条边');
+
+    // 再点一次：不能复用同一个占位地址（否则等于原地踏步）
+    const second = await session.expandOneLevel();
+    assert.equal(second.ok, true);
+    assert.equal(second.url, 'http://t.local/a/siteatlas-expand/2');
+
+    // 暂停时不允许展开
+    session.pause();
+    const blocked = await session.expandOneLevel();
+    assert.equal(blocked.ok, false);
+    assert.match(blocked.message, /未在记录状态/);
+  } finally {
+    h.close();
+  }
+});
+
 test('M3 回根/回父都是绝对导航，且输入事件原样回传', async () => {
   const h = await makeHarness();
   try {

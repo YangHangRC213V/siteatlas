@@ -13,7 +13,7 @@
 | M0 骨架 | ✅ | 仓库结构、SQLite 迁移、URL 规范化与身份、`/api/sites` 五接口、站点卡片视图 |
 | M1 自动采集 | ✅ | 抓取器（静态 + JS 回落）、持久化队列、三层去重、全部护栏、实时进度、懒加载树视图 |
 | M2 树视图 | ✅ | 虚拟滚动、懒加载、属性面板、隐藏地址、软删、撤销重做、拖拽重挂、回收站 |
-| M3 手动采集 | ✅ | CDP 画面串流 + 输入回传 + 点击捕获 + 回根识别（验收 22 项断言全过） |
+| M3 手动采集 | ✅ | CDP 画面串流 + 输入回传 + 点击捕获 + 回根识别 + 展开一层（验收 25 项断言全过） |
 | M4 导出与开放 | ✅ | JSON/JSONL/CSV/SQLite/Mermaid 导出 + manifest + 对外只读 API（验收 28 项，含独立第三方脚本） |
 
 
@@ -40,7 +40,10 @@ M3 已实现的关键机制：
 - **输入**：画面上的鼠标/键盘/滚轮折成 CDP `Input.dispatchMouseEvent` / `dispatchKeyEvent` 回传，等于「在浏览器里手动点」；
 - **点击捕获**：`Runtime.addBinding` + 捕获阶段 click 监听，点击先进「点击↔导航」配对队列，只有真的发生导航才建边建节点；未触发导航的点击进**待确认队列**（界面实时显示，确认后才入树）；
 - **身份与回根**：一律按 `identityKey` 判身份，回到根/已知节点**只补边不重复建节点**；回根/回父用绝对 URL 导航，不用浏览器后退；越界导航被范围校验拒绝；
-- **人工纠正**：「以当前页为根」「置为父节点」直写并留 `manual_overrides` 痕迹；防环校验沿祖先链。
+- **人工纠正**：「以当前页为根」「置为父节点」直写并留 `manual_overrides` 痕迹；防环校验沿祖先链；
+- **展开一层**（§4.3 工具条）：为「链接被 JS 拦截 / 用户想按自己意图继续深入」提供一个明确的推进动作 ——
+  在当前页下建一个占位子节点（派生地址 `<当前路径>/siteatlas-expand/<n>`，标 `need_human`）并导航过去，
+  之后可在树视图用「修改地址」改成真实地址。
 
 M2 已实现的关键机制：
 
@@ -90,7 +93,7 @@ npm run dev          # server 用 tsx watch（:8787），web 用 vite（:5173，
 ## 校验
 
 ```bash
-npm test             # node --test：URL 规范化/范围、迁移与 DDL、/api/sites、采集内核与接口、WS、手动会话、导出与只读 API（108 项）
+npm test             # node --test：URL 规范化/范围、迁移与 DDL、/api/sites、采集内核与接口、WS、手动会话、导出与只读 API（109 项）
 npm run typecheck    # shared + server + web 三处 tsc --noEmit
 
 node scripts/demo-site.mjs 8899      # 起本地演示站（多级/多父/变体/404/robots/素材/SPA/分页）
@@ -98,7 +101,7 @@ node scripts/demo-site.mjs 8899      # 起本地演示站（多级/多父/变体
 node scripts/e2e-m0-screenshot.mjs   # M0 端到端 + 截图
 node scripts/e2e-m1-crawl.mjs        # M1 端到端：建站→订阅 WS→采集→树→自检→截图（14 项断言）
 node scripts/e2e-m2-tree.mjs         # M2 端到端：拖拽重挂/撤销重做/批量/属性/回收站/12k 节点压测（18 项断言）
-node scripts/e2e-m3-manual.mjs       # M3 端到端：真实 Chromium 手动点选建边/回根不重复建节点/待确认确认与丢弃（22 项断言）
+node scripts/e2e-m3-manual.mjs       # M3 端到端：真实 Chromium 手动点选建边/回根不重复建节点/展开一层/待确认确认与丢弃（25 项断言）
 node scripts/e2e-m4-export.mjs       # M4 端到端：五种格式导出 + manifest + 只读 API + 独立第三方脚本消费（28 项断言）
 ```
 

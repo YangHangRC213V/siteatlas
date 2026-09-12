@@ -492,6 +492,70 @@ export class ManualSession {
     return { ...node, __fresh: created };
   }
 
+  /* ---------------- 展开一层（§4.3 手动工具条 / §6.5 记录并展开） ---------------- */
+
+  /**
+   * 展开一层：在当前页面下虚拟出一个「下一层」，导航过去并建边建节点。
+   *
+   * 为什么要有这个动作（而不是只靠用户点链接）：
+   *   requirements §4.3 的手动模式工具条明确要求「开始-暂停-继续-回根-**展开一层**-结束并保存」。
+   *   当页面上的链接被 JS 拦截、或用户想按自己的意图继续深入（例如页面还没做完），
+   *   点链接走不通 —— 这时需要一个「我说了算」的推进动作。
+   *
+   * 地址怎么来：手动模式没有真实的目标地址可用（是用户意图，不是页面上存在的链接），
+   * 因此按当前页地址派生一个**可预期的占位地址**：`<当前路径>/siteatlas-expand/<序号>`。
+   *   · 只写本地图（节点 + 边），不改站点数据；
+   *   · 目标页大概率不存在（404）——这是这个动作的固有语义，记在 node.status='need_human'
+   *     并在事件里说清楚：占位节点的地址应当在「修改地址」里改成真实地址。
+   *   · 若该占位地址已被占用（重复点），序号自增，保证每次都是新的一层。
+   */
+  async expandOneLevel(): Promise<{ ok: boolean; message: string; nodeId: string | null; url: string | null }> {
+    if (this.status !== 'running') {
+      return { ok: false, message: '会话未在记录状态（暂停/已结束），无法展开', nodeId: null, url: null };
+    }
+    const current = this.current;
+    if (current === null) return { ok: false, message: '当前页面身份未知', nodeId: null, url: null };
+
+    const base = this.safeNormalize(current.url);
+    if (base === null) return { ok: false, message: `当前地址不合法：${current.url}`, nodeId: null, url: null };
+
+    // 若当前页本身就是占位地址（连续展开），从它的基址继续，避免 /siteatlas-expand/1/siteatlas-expand/1 这种套娃
+    const prefix = (base.url.replace(/\/+$/, '').replace(/\/siteatlas-expand\/\d+$/, '') || base.url.replace(/\/+$/, ''));
+    let candidate: string | null = null;
+    let normalized: ReturnType<typeof this.safeNormalize> = null;
+    for (let seq = 1; seq <= 50; seq++) {
+      normalized = this.safeNormalize(`${prefix}/siteatlas-expand/${seq}`);
+      if (normalized === null) break;
+      if (this.nodes.findByUrlForSite(this.deps.siteId, normalized.url, normalized.identityKey) === null) {
+        candidate = normalized.url;
+        break;
+      }
+    }
+    if (candidate === null || normalized === null) {
+      return { ok: false, message: '无法派生占位地址（当前地址形态不支持）', nodeId: null, url: null };
+    }
+    if (!this.inScope(normalized)) {
+      return { ok: false, message: `超出站点范围（${this.deps.siteScope}）：${normalized.host}`, nodeId: null, url: null };
+    }
+
+    const node = this.upsertNode({
+      url: normalized.url,
+      identityKey: normalized.identityKey,
+      parentId: current.nodeId,
+      depth: Math.min(MAX_MANUAL_DEPTH, current.depth + 1),
+      displayLabel: deriveDisplayLabel({ url: normalized.url, title: null }),
+      reason: 'expand-one-level',
+    });
+    // 占位地址不是抓来的页面：标成 need_human，提示用户回来改地址
+    this.nodes.setStatus(node.id, 'need_human');
+    this.linkEdge({ fromNodeId: current.nodeId, toNodeId: node.id, payload: null, href: normalized.url });
+    this.emit('warn', `已展开一层（占位地址 ${normalized.url}）——页面多半不存在，请在树视图里用「修改地址」改成真实地址`);
+
+    // 等导航落地再返回：调用方（WS）随后立刻取 state，若不等就会拿到「展开前」的身份
+    await this.navigate(normalized.url);
+    return { ok: true, message: `已展开一层：${normalized.url}`, nodeId: node.id, url: normalized.url };
+  }
+
   /* ---------------- 待确认队列与人工指定 ---------------- */
 
   private pushPendingConfirm(item: PendingConfirm): void {

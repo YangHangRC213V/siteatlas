@@ -217,6 +217,21 @@ const edgesAfterDiscard = (await api(`/api/sites/${siteId}/tree?parentId=${creat
 check('丢弃后待确认项从界面消失', (await page.locator('.pending-list__item').count()) === 0, `丢弃前 ${pendingAgain} 条`);
 check('丢弃不建边（根的子节点数不变）', edgesAfterDiscard === edgesBeforeDiscard, `${edgesBeforeDiscard} → ${edgesAfterDiscard}`);
 
+// ---------- 展开一层（§4.3 工具条）----------
+const beforeExpand = await nodeCount();
+await page.locator('.manual-controlbar .btn', { hasText: '展开一层' }).click();
+await page.waitForTimeout(2000);
+const afterExpand = await nodeCount();
+const expandState = (await api(`/api/sites/${siteId}/manual`)).state;
+check('展开一层：新建占位节点并导航过去', afterExpand === beforeExpand + 1, `${beforeExpand} → ${afterExpand}`);
+check(
+  '展开一层的当前页 = 新的占位地址',
+  (expandState?.current?.url ?? '').includes('/siteatlas-expand/'),
+  expandState?.current?.url ?? '未知',
+);
+const expandNode = await api(`/api/nodes/${expandState.current.nodeId}`);
+check('占位节点标记为 need_human（提醒改成真实地址）', expandNode.node.status === 'need_human', expandNode.node.status);
+
 // ---------- 暂停 / 继续 / 结束 ----------
 await page.locator('.manual-controlbar .btn', { hasText: '暂停' }).click();
 await page.waitForTimeout(600);

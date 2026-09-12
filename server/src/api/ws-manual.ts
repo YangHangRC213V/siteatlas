@@ -41,6 +41,7 @@ export interface ManualUpstream {
     | 'back-parent'
     | 'set-root'
     | 'set-parent'
+    | 'expand'
     | 'mode'
     | 'pause'
     | 'resume'
@@ -125,6 +126,11 @@ export async function registerManualWsRoutes(app: FastifyInstance, service: Manu
             case 'back-parent':
               await session.backToParent();
               break;
+            case 'expand': {
+              const outcome = await session.expandOneLevel();
+              if (!outcome.ok) send({ type: 'error', code: 'EXPAND_FAILED', message: outcome.message });
+              break;
+            }
             case 'set-root':
               session.setCurrentAsRoot();
               break;

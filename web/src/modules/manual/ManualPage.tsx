@@ -126,6 +126,14 @@ export function ManualPage({ siteId }: ManualPageProps): React.JSX.Element {
               </button>
               <button
                 type="button"
+                className="btn"
+                onClick={() => send({ type: 'expand' })}
+                title="在当前页面下虚拟出一个下一层并导航过去（占位地址，之后可在树视图里改地址）"
+              >
+                ↳ 展开一层
+              </button>
+              <button
+                type="button"
                 className={state?.progressMode === 'record-and-expand' ? 'btn btn--primary' : 'btn'}
                 onClick={() =>
                   send({ type: 'mode', mode: state?.progressMode === 'record-and-expand' ? 'record-only' : 'record-and-expand' })
