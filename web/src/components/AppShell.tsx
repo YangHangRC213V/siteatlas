@@ -100,7 +100,7 @@ export function AppShell({ active, siteId, children }: AppShellProps): React.JSX
         <span aria-hidden="true">·</span>
         <span>契约 v{health?.schemaVersion ?? '—'}</span>
         <span aria-hidden="true">·</span>
-        <span>M1 进行中（站点 / 采集 / 结构可用；规则 / 数据 / 导出按里程碑开放）</span>
+        <span>M2 进行中（站点 / 采集 / 结构可用；规则 / 数据 / 导出按里程碑开放）</span>
         <span className="nav__spacer" />
         <span>数据仅存本机 data/</span>
       </footer>

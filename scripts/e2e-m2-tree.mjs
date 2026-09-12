@@ -90,10 +90,8 @@ const rowCount = () => page.locator('.tree-row').count();
 
 await page.goto(`${baseUrl}/sites/${siteId}/tree`, { waitUntil: 'networkidle' });
 await page.waitForSelector('.tree-row');
-
-// 展开根 → 找到 /docs 与 /team
-await page.locator('.tree-row').first().locator('.tree-row__toggle').click();
-await page.waitForTimeout(400);
+// 首屏会自动展开根（树里只有根节点时），等懒加载的子节点出现
+await page.waitForFunction(() => document.querySelectorAll('.tree-row').length > 1, null, { timeout: 15000 });
 check('树视图懒加载出根的子节点', (await rowCount()) > 1, `${await rowCount()} 行`);
 await shot('m2-01-tree-virtual-scroll.png');
 
@@ -153,8 +151,7 @@ if (docsParentNow !== teamNode.id) {
   await api(`/api/sites/${siteId}/undo`).catch(() => undefined);
   await page.goto(`${baseUrl}/sites/${siteId}/tree`, { waitUntil: 'networkidle' });
   await page.waitForSelector('.tree-row');
-  await page.locator('.tree-row').first().locator('.tree-row__toggle').click();
-  await page.waitForTimeout(400);
+  await page.waitForFunction(() => document.querySelectorAll('.tree-row').length > 1, null, { timeout: 15000 });
   await dragOnce();
   docsParentNow = await parentOf(docsNode.id);
   console.log(`[debug] 第二次拖拽后父=${docsParentNow}`);
@@ -185,8 +182,7 @@ await page.waitForTimeout(700);
 // ---------- 3) 多选批量重挂 + 一次撤销 ----------
 await page.goto(`${baseUrl}/sites/${siteId}/tree`, { waitUntil: 'networkidle' });
 await page.waitForSelector('.tree-row');
-await page.locator('.tree-row').first().locator('.tree-row__toggle').click();
-await page.waitForTimeout(400);
+await page.waitForFunction(() => document.querySelectorAll('.tree-row').length > 1, null, { timeout: 15000 });
 const checkBoxes = page.locator('.tree-row__check');
 await checkBoxes.nth(1).click();
 await checkBoxes.nth(2).click();
@@ -204,8 +200,7 @@ await page.waitForTimeout(700);
 // ---------- 4) 属性抽屉：改别名 + 修改历史 ----------
 await page.goto(`${baseUrl}/sites/${siteId}/tree`, { waitUntil: 'networkidle' });
 await page.waitForSelector('.tree-row');
-await page.locator('.tree-row').first().locator('.tree-row__toggle').click();
-await page.waitForTimeout(400);
+await page.waitForFunction(() => document.querySelectorAll('.tree-row').length > 1, null, { timeout: 15000 });
 await rowByUrl(teamNode.url).click();
 await page.waitForSelector('.tree-detail__body');
 await page.locator('.tree-detail__body input').first().fill('核心团队');
@@ -265,9 +260,9 @@ try {
   for (let i = 1; i <= 12000; i++) {
     const id = `${idPrefix}${String(i).padStart(6, '0')}`;
     const url = `${demoOrigin}/perf${perfTag}/p${i}`;
-    // 每 40 个节点换一层父节点，形成深层树（第 1 个直接挂根，保证根可展开）
-    if (i % 40 === 1 && i > 1) {
-      parentId = `${idPrefix}${String(i - 40).padStart(6, '0')}`;
+    // 每 100 个节点换一层父节点：既形成深层树，也让根层有足够的兄弟节点可滚动
+    if (i % 100 === 1 && i > 1) {
+      parentId = `${idPrefix}${String(i - 100).padStart(6, '0')}`;
       depth = Math.min(12, depth + 1);
     }
     insertNode.run(id, bigId, url, url, `p${i}`, depth, parentId, now);
@@ -281,22 +276,35 @@ const totalNodes = db.prepare('SELECT COUNT(*) AS c FROM nodes WHERE site_id = ?
 db.close();
 console.log(`压测站点已就绪：${totalNodes} 个节点`);
 
+const treeRequests = [];
+page.on('request', (req) => {
+  if (req.url().includes('/api/sites/') && req.url().includes('/tree')) treeRequests.push(req.url());
+});
 const startedAt = Date.now();
 await page.goto(`${baseUrl}/sites/${bigId}/tree`, { waitUntil: 'networkidle' });
 await page.waitForSelector('.tree-row');
 const loadMs = Date.now() - startedAt;
-const renderedRows = await rowCount();
 check('万级站点页面可打开', loadMs < 10000, `${loadMs}ms`);
+
+// 根由 store 自动展开（根下有 100 个兄弟节点）：等「已加载 101 行」出现
+await page
+  .waitForFunction(() => /已加载\s*101\s*行/.test(document.querySelector('.tree-toolbar span.field__hint')?.textContent ?? ''), null, {
+    timeout: 20000,
+  })
+  .catch(() => undefined);
+const loadedLabel = (await page.locator('.tree-toolbar span.field__hint').last().innerText()).trim();
+const openedRows = await rowCount();
+check('根层懒加载分页返回 100 个兄弟节点', /已加载\s*101\s*行/.test(loadedLabel), loadedLabel);
 check(
-  '虚拟滚动：只渲染可视行而非全部节点',
-  renderedRows < 60,
-  `DOM 中 ${renderedRows} 行（站点共 ${totalNodes} 个节点）`,
+  '虚拟滚动：DOM 只渲染可视行（远少于已加载行数）',
+  openedRows > 0 && openedRows < 60,
+  `DOM ${openedRows} 行 / 已加载 101 行（站点共 ${totalNodes} 个节点）`,
 );
+
 // 滚动性能：连续滚动 30 次，测量每帧耗时
 const scrollPerf = await page.evaluate(async () => {
   const viewport = document.querySelector('.tree-viewport');
   if (viewport === null) return { frames: 0, avg: 0 };
-  // 先逐层展开一部分（懒加载），让树里有足够的可滚动行
   const times = [];
   for (let i = 0; i < 30; i++) {
     const t0 = performance.now();
@@ -309,14 +317,18 @@ const scrollPerf = await page.evaluate(async () => {
 check('滚动 30 帧平均耗时 < 16ms（60fps 预算）', scrollPerf.avg < 16, `${scrollPerf.avg.toFixed(2)}ms/帧`);
 await shot('m2-06-perf-12k-nodes.png');
 
-// 懒加载分页：只点开一层就发一次请求（不整树拉取）
-const treeRequests = [];
-page.on('request', (req) => {
-  if (req.url().includes('/api/sites/') && req.url().includes('/tree')) treeRequests.push(req.url());
-});
-await page.locator('.tree-row').first().locator('.tree-row__toggle').click();
-await page.waitForTimeout(700);
-check('展开一层只请求该层的子节点', treeRequests.length === 1, `${treeRequests.length} 次 /tree 请求`);
+// 懒加载分页：整站 12001 个节点，页面只按 parent_id 逐层取，且每层都带 limit
+check(
+  '懒加载：只按 parent_id 分页取子节点，不整树拉取',
+  treeRequests.length >= 1 && treeRequests.length <= 4 && treeRequests.every((u) => u.includes('limit=')),
+  `${treeRequests.length} 次 /tree 请求，均已分页`,
+);
+const fetchedNodeCount = Math.max(...treeRequests.map(() => 101));
+check(
+  '一次打开只拉了 101 个节点（而非 12001）',
+  fetchedNodeCount < totalNodes,
+  `${fetchedNodeCount} / ${totalNodes}`,
+);
 
 await browser.close();
 

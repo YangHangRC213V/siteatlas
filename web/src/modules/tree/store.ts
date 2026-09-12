@@ -98,6 +98,21 @@ export function kindLabel(kind: string): string {
   return KIND_LABELS[kind] ?? kind;
 }
 
+/**
+ * 树里只有根节点时自动展开它：否则打开的是一片「一个节点」的树，
+ * 用户必须自己点开才看得到内容（首次进入与修正操作之后都要保证这一点）。
+ */
+async function ensureRootExpanded(
+  get: () => TreeStoreState,
+  _set: (partial: Partial<TreeStoreState>) => void,
+): Promise<void> {
+  const rows = get().rows;
+  if (rows.length !== 1) return;
+  const rootRow = rows[0] as TreeRow;
+  if (rootRow.expanded || rootRow.node.child_count === 0) return;
+  await get().toggle(rootRow.node.id);
+}
+
 export const useTreeStore = create<TreeStoreState>((set, get) => ({
   siteId: null,
   rows: [],
@@ -122,6 +137,7 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
     if (get().siteId === siteId && get().rows.length > 0) return;
     set({ siteId, rows: [], detail: null, error: null, query: '', statusFilter: null, mode: 'tree', trash: [], searchHits: null });
     await get().loadRoot();
+    await ensureRootExpanded(get, set);
   },
 
   unbind() {
@@ -213,12 +229,7 @@ export const useTreeStore = create<TreeStoreState>((set, get) => ({
     ]);
     await get().loadRoot();
 
-    // 根层默认展开：只有根节点时它就是「当前的树」
-    const rootRows = get().rows;
-    if (rootRows.length === 1) {
-      const rootRow = rootRows[0] as TreeRow;
-      if (!rootRow.expanded && rootRow.node.child_count > 0) await get().toggle(rootRow.node.id);
-    }
+    await ensureRootExpanded(get, set);
 
     // 自顶向下逐层恢复：每轮挑「层级最小且尚未展开」的节点
     for (let guard = 0; guard < 200; guard++) {

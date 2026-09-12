@@ -513,7 +513,7 @@ function TreeRowView({
   return (
     <div
       className={`tree-row${selected ? ' tree-row--selected' : ''}${isDropTarget ? ' tree-row--drop' : ''}${dragging ? ' tree-row--dragging' : ''}`}
-      style={{ paddingLeft: 8 + level * 18, height }}
+      style={{ paddingLeft: 8 + level * 22, height }}
       title={node.url}
       role="treeitem"
       aria-expanded={hasChildren ? expanded : undefined}
