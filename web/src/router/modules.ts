@@ -27,7 +27,7 @@ export const MODULES: ModuleDef[] = [
   { key: 'tree', label: '结构', path: '/tree', icon: '⌥', milestone: 'M1', perSite: true, ready: true },
   { key: 'data', label: '数据', path: '/data', icon: '▤', milestone: 'M4', perSite: true, ready: false },
   { key: 'rules', label: '规则', path: '/rules', icon: '⚙', milestone: 'M1', perSite: true, ready: false },
-  { key: 'export', label: '导出', path: '/export', icon: '⤴', milestone: 'M4', perSite: true, ready: false },
+  { key: 'export', label: '导出', path: '/export', icon: '⤴', milestone: 'M4', perSite: true, ready: true },
   { key: 'settings', label: '设置', path: '/settings', icon: '⚒', milestone: 'M1', perSite: false, ready: false },
 ];
 

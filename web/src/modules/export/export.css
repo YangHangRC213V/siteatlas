@@ -1,0 +1,129 @@
+/* 导出模块样式（只消费 tokens.css 变量，视觉规范见 requirements §5） */
+.export-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 1fr) minmax(420px, 1.3fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+@media (max-width: 1180px) {
+  .export-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+.export-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+}
+
+.export-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-height: 46vh;
+  overflow: auto;
+}
+.export-list__item {
+  border: 1px solid var(--c-border);
+  border-radius: var(--r-md);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--c-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.export-list__item--active {
+  border-color: var(--c-accent);
+  background: var(--c-accent-soft);
+}
+.export-list__pick {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+/* 状态徽标不要换行（列表窄时「已完成」会折成两行） */
+.export-list .crawl-status {
+  white-space: nowrap;
+  flex: none;
+}
+.export-list__id {
+  font-size: var(--fs-sm);
+}
+.export-list__error {
+  color: var(--c-danger);
+  font-size: var(--fs-sm);
+}
+
+.export-detail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.export-detail__path {
+  word-break: break-all;
+}
+.export-detail__sha {
+  color: var(--c-text-muted);
+}
+.export-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.export-subhead {
+  margin: var(--sp-2) 0 0;
+  font-size: var(--fs-sm);
+  color: var(--c-text-muted);
+  text-transform: none;
+}
+.export-endpoints,
+.export-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.export-endpoints li,
+.export-files li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  justify-content: space-between;
+  border-bottom: 1px dashed var(--c-border);
+  padding-bottom: 4px;
+}
+.export-endpoints a {
+  font-size: var(--fs-sm);
+  word-break: break-all;
+}
+
+/* 通用表格：导出产物清单与后续模块（数据/规则）复用 */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+.table th,
+.table td {
+  text-align: left;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--c-border);
+  vertical-align: top;
+}
+.table th {
+  color: var(--c-text-muted);
+  font-weight: 500;
+}

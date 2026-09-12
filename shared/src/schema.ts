@@ -557,3 +557,103 @@ export interface ManualEventRecord {
   level: 'info' | 'warn' | 'error';
   message: string;
 }
+
+/* ---------------- M4 导出与对外只读 API（dev-spec §5.1 / §5.3 / §6.7） ---------------- */
+
+/** 导出格式：§6.7 的 structure 层（raw/parsed 层由素材目录承载，随导出一起打包） */
+export const EXPORT_FORMATS = ['json', 'jsonl', 'csv', 'sqlite', 'mermaid'] as const;
+export type ExportFormat = (typeof EXPORT_FORMATS)[number];
+
+/** 导出范围：整站 / 某节点子树 / 仅未删（默认） */
+export const EXPORT_SCOPES = ['site', 'subtree', 'all'] as const;
+export type ExportScope = (typeof EXPORT_SCOPES)[number];
+
+export type ExportStatus = 'pending' | 'running' | 'done' | 'failed';
+
+/** dev-spec §4 exports 表 */
+export interface ExportRecord {
+  id: string;
+  site_id: string | null;
+  format: string;
+  scope_json: string | null;
+  dir: string | null;
+  status: string;
+  manifest_path: string | null;
+  created_at: number;
+  /** 以下为 M4 追加的实现字段（见 DECISIONS.md） */
+  site_name: string | null;
+  root_url: string | null;
+  preset_id: string | null;
+  counts_json: string | null;
+  error: string | null;
+  finished_at: number | null;
+}
+
+export interface ExportRequest {
+  format: ExportFormat;
+  scope?: ExportScope;
+  /** 子树导出的根节点（scope='subtree' 时必填） */
+  nodeId?: string;
+  presetId?: string;
+  /** 是否包含已软删节点（默认否，软删只在回收站里） */
+  includeDeleted?: boolean;
+}
+
+/** manifest.json 里单个文件的登记（§6.7 files 映射） */
+export interface ExportFileEntry {
+  sha256: string;
+  bytes: number;
+  /** 该文件承载的数据集：nodes | edges | graph | materials */
+  dataset: string;
+  rows?: number;
+}
+
+export interface ExportCounts {
+  nodes: number;
+  edges: number;
+  materials: number;
+  deleted: number;
+}
+
+/** manifest.json —— 下游工具唯一的入口，字段齐全即可不读库 */
+export interface ExportManifest {
+  schemaVersion: string;
+  exportId: string;
+  siteId: string;
+  siteName: string;
+  rootUrl: string;
+  generatedAt: number;
+  format: ExportFormat;
+  scope: ExportScope;
+  counts: ExportCounts;
+  /** §6.7 三档数据分层 */
+  layers: {
+    structure: string[];
+    raw: string[];
+    parsed: string[];
+  };
+  files: Record<string, ExportFileEntry>;
+  /** 只读 API 的等价入口（下游也可走 HTTP） */
+  endpoints: {
+    graph: string;
+    nodes: string;
+    edges: string;
+    manifest: string;
+    sqlite: string;
+    node: string;
+  };
+}
+
+export interface ExportStatusResponse {
+  export: ExportRecord;
+  manifest: ExportManifest | null;
+}
+
+export interface MaterialRecordApi {
+  id: number;
+  kind: MaterialKind;
+  rel_path: string;
+  bytes: number | null;
+  sha256: string | null;
+  created_at: number;
+}

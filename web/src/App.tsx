@@ -7,7 +7,8 @@
  *   /sites/:id/crawl          → 采集控制台（modules/crawl，M1）
  *   /sites/:id/manual         → 手动引导采集（modules/manual，M3）
  *   /sites/:id/tree           → 树视图（modules/tree，M1 懒加载树；M2 加修正层）
- *   /sites/:id/{data,rules,export} → 各模块占位页，标注所属里程碑
+ *   /sites/:id/export         → 导出（modules/export，M4）
+ *   /sites/:id/{data,rules}   → 各模块占位页，标注所属里程碑
  *   /settings                 → 设置占位页
  */
 import { useEffect } from 'react';
@@ -20,6 +21,7 @@ import { SitesPage } from './modules/sites/SitesPage.tsx';
 import { CrawlPage } from './modules/crawl/CrawlPage.tsx';
 import { TreePage } from './modules/tree/TreePage.tsx';
 import { ManualPage } from './modules/manual/ManualPage.tsx';
+import { ExportPage } from './modules/export/ExportPage.tsx';
 
 export function App(): React.JSX.Element {
   const route = useRoute();
@@ -43,6 +45,13 @@ export function App(): React.JSX.Element {
       return (
         <AppShell active="tree" siteId={id}>
           <TreePage siteId={id} />
+        </AppShell>
+      );
+    }
+    if (sub === 'export') {
+      return (
+        <AppShell active="export" siteId={id}>
+          <ExportPage siteId={id} />
         </AppShell>
       );
     }

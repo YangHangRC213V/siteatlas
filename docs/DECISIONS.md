@@ -133,3 +133,31 @@
 - [测试][M3] e2e 开头**先清理服务端遗留的手动会话**——理由：脚本中途失败会把会话留在 running，导致下一轮「结束后无会话」断言假失败（本轮真实发生过）。
 - [测试][M3] 待确认项的「确认」与「丢弃」纳入 e2e：确认后队列清空、**不新建节点**、根发出的边带上 `source=manual`；丢弃后界面消失且根的子节点数不变——理由：规格 §6.5 的人工裁决路径原先只有接口级测试，端到端未覆盖。
 - [缺陷][M3] 本轮修掉 4 个真实缺陷并留下回归测试：①不带 url 启动停在 about:blank；②配对窗口内无导航的点击未进待确认队列；③待确认队列变化不推送（界面永远 0 条）；④`stop()` 关闭页面导致的递归。理由：这些都是「看起来没反应」类问题，必须在文档里留下复现路径。
+
+## M4 决策（导出与开放）
+
+- [导出][M4] §4 的 `exports` 表 8 个字段一字不改，**追加 6 个实现字段**（`site_name`/`root_url`/`preset_id`/`counts_json`/`error`/`finished_at`，迁移 `004_export_records.sql`）——理由：站点改名或归档后，历史导出仍要能说明「这是谁导的」；列表页显示计数不必读 manifest 文件；失败原因要能查到。
+- [导出][M4] 导出**同步完成**（POST 返回即 `done`），不引入任务队列——理由：本地 SQLite + 文件系统，万级节点是亚秒级（实测 15 节点 30ms 内、含 SQLite 快照）；§5.1 的「导出任务」语义用一条 `exports` 记录承载即可，队列是过度设计。
+- [导出][M4] 产物目录严格按 §6.7：`data/sites/<siteId>/exports/<exportId>/`；**每种格式至少都写** `graph.json` + `nodes.jsonl` + `edges.csv`（结构层公共部分），格式专属文件再加 `nodes.csv` / `siteatlas.db` / `graph.mmd` 与 `materials.json`——理由：manifest 的 `layers.structure` 是给下游发现文件用的，如果只有 mermaid 一种文件，「仅凭 manifest 读取全部数据」就不成立。
+- [导出][M4] manifest **最后写**，且 `files` 里不含 manifest 自身——理由：manifest 要登记其它文件的 sha256/bytes，先写自己就无法自洽（也无法把自己写进自己的校验和）；下游靠固定文件名读它。
+- [导出][M4] `nodes.jsonl` **第一行是 meta**，其余一行一个节点——理由：下游可能只有一个逐行读取器，流式读时立刻能拿到 `schemaVersion` 与计数；同时保留「不看 manifest 也能读」的兜底。
+- [导出][M4] CSV 按 **RFC4180**：逗号分隔、必要时双引号包裹、内部引号加倍、CRLF 行尾、含表头——理由：requirements §4.6 要求 Excel/表格工具直接消费；测试里对含逗号/引号/换行的字段单独断言。
+- [导出][M4] SQLite 快照**新建一个库并逐行插入**（不是 ATTACH 复制主库），并额外写 `meta` / `manifest` / `query_examples` 三张说明表——理由：ATTACH 复制会把主库的 WAL/内部表/修正层一起带出去，且无法体现「导出范围」；快照要的是「打开即可查询 + 自带说明」，`query_examples` 是给第一次打开的人看的。
+- [导出][M4] 导出的是**有效形态**（自动层叠加修正层）：`parent_id` 是用户看到的父节点，另保留 `auto_parent_id`，`meta.projection='effective'` 明确标注——理由：§6.7 的导出是给人/下游用的成品，不是内部中间态；同时留 `auto_parent_id` 让「原始结构」不丢。
+- [导出][M4] 软删节点**默认不导出**，但计入 `counts.deleted`；`scope='all'` + `includeDeleted=true` 时导出并带 `_deleted` 语义（`is_deleted: true`）——理由：§6.4「删除一律软删，进回收站」，导出成品里不该混入回收站内容；而计数要让人知道「有多少没导」。
+- [导出][M4] 子树导出用**有效投影上的递归 CTE**，且**两端都在集合内**的边才导出——理由：子树导出若带出「跨出子树的边」，下游会看到指向不存在节点的边。
+- [导出][M4] 超过 **5 万节点**自动改走流式写出（按行 append，内存与规模无关），并有测试断言「流式版与内存版语义一致」——理由：§1 允许到十万级，把整图拼成字符串再 `JSON.stringify` 会明显吃内存；两条路径的输出形状必须一致，否则下游行为随站点规模变化。
+- [导出][M4] Mermaid 上限 **800 节点**，超出时在图里写一行「… 另有 N 个节点未画出（上限 M）」——理由：万级树画成 flowchart 既不可读也会让 Mermaid 渲染卡死；写明截断比静默丢节点诚实。
+- [导出][M4] 导出目录里额外写一份 `README.md`（人读的接入说明），但**不登记进 manifest.files**——理由：它不是数据，混进 `files` 会让下游的「逐文件校验」多出一个无意义的项。
+- [素材][M4] 采集时归档三档数据：结构层入库，原件写 `raw/<nodeId>.html`，解析结果写 `parsed/<nodeId>.json`（标题/描述/正文摘要 4KB/内容指纹/是否渲染回落），登记在 §4 的 `materials` 表并按 `nodeId` 关联——理由：§4.6「数据分三档，分开存、按 nodeId 关联」，§6.7 的 manifest 用 `layers.raw` / `layers.parsed` 引用这些文件；导出只引用不复制，避免同一份 HTML 存两份。
+- [素材][M4] **原件层跟随抓取预设的 `downloadAssets`**（默认 false ⇒ 只留解析结果与摘要），解析层始终归档——理由：`downloadAssets=false` 是默认值，若默认把整站 HTML 落盘，大站会把磁盘写满；而「正文摘要 + 指纹」是导出与去重的基础，必须默认有（开关语义见 DECISIONS 中对 §4.4 的解释）。
+- [素材][M4] 文件名按 `nodeId` 派生且 `materials` 表按 `(node_id, kind, rel_path)` 幂等 upsert——理由：断点续爬重抓同一页只覆盖同一个文件，素材清单不会因重爬膨胀。
+- [接口][M4] 新增 `GET /api/sites/:id/export`（历史列表）与 `GET /api/exports/:id/files`（产物文件清单）——理由：§5.1 只列了「建导出任务」与「查导出状态」，但界面要列出该站的历史导出、要展示磁盘上的产物；两者都是只读补充。
+- [接口][M4] 只读 API 除了 §5.3 的 `manifest.json`/`graph.json`/`nodes.jsonl`/`edges.csv`/`siteatlas.db`/`nodes/:nodeId`，再加 `GET /open/v1/exports/:exportId/<文件名>`（原样取回产物）与 `GET /open/v1/exports/:exportId`（目录清单）——理由：§7 M4 的验收是「第三方脚本仅凭 manifest 能读取全部数据」，而 manifest 里的 `files` 只有文件名，必须有一个**按文件名取回**的入口；`/open/v1/sites/:id/*` 则用于「不想先建导出任务」的场景。
+- [接口][M4] 产物下载做**规范化路径校验**（resolve 后必须仍在导出目录内），编码过的 `../` 返回 400；未编码的 `../` 会被 HTTP 层归一化，落到 SPA 回落而不是文件内容（不构成泄露）——理由：只读 API 面向本机其它工具，仍然不能给出「读任意文件」的口子；测试对三种穿越写法都有断言。
+- [接口][M4] 只读 API 里父节点字段统一叫 **`parent_id`**（不是 `effective_parent_id`），并同时给出 `auto_parent_id`——理由：下游只该认一个名字；两个都叫 effective 会让第三方脚本在不同入口拿到不同字段名。
+- [契约][M4] `shared/schema.ts` 新增 `EXPORT_FORMATS`/`EXPORT_SCOPES`/`ExportRecord`/`ExportManifest`/`ExportFileEntry`/`ExportCounts`/`MaterialRecordApi`——理由：manifest 会被第三方按字段名消费，类型必须是契约的一部分，不能只存在于服务端。
+- [前端][M4] 导出页 `/sites/:id/export`：格式下拉（带每种格式的用途说明）、范围（整站/子树/含软删）、历史导出列表、右侧 manifest 文件清单（含 sha256 前 12 位）、下游只读 API 地址（可直接点开）、产物目录一键复制——理由：§4.6 要求「导出预设 + 一键复用」，M4 先做到「一次点击看清产物与下游入口」；预设（presetId）字段已落库，界面留到后续版本。
+- [验收][M4] `scripts/e2e-m4-export.mjs` 的第三方消费脚本**写到系统临时目录、不 import 本仓库任何模块**，只用 `fetch` + `node:crypto` 把 manifest 里的每个文件取回并校验 sha256——理由：验收标准说的是「第三方脚本」，若复用仓库里的类型或导出函数，这条验收就变成自证；独立进程 + 独立文件才是真证据。
+- [测试][M4] 新增 `core/export/export.test.ts`（7 项：投影/软删/子树/写出器/流式等价/服务编排/错误码）与 `api/export-api.test.ts`（4 项：素材归档/导出接口/只读 API/404）——理由：导出与只读 API 是「对外契约」，必须用真实 Fastify 实例 + 本地 fixture 站点验证，临时目录承载产物以免污染仓库 `data/`。
+- [测试][M4] 迁移幂等测试的期望列表补上 `004_export_records`——理由：迁移清单是显式断言的，新增迁移必须同步（避免「悄悄多跑了一条 DDL」）。

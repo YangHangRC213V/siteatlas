@@ -6,7 +6,7 @@
 - `docs/crawler-tool-dev-spec.md`（开发规格书 v1.0）—— 施工图
 - `docs/DECISIONS.md`（实现决策记录：规格未覆盖处的取舍与理由）
 
-## 当前状态：M3 手动引导采集（dev-spec §7）
+## 当前状态：M4 导出与开放（dev-spec §7）
 
 | 里程碑 | 状态 | 内容 |
 |---|---|---|
@@ -14,7 +14,8 @@
 | M1 自动采集 | ✅ | 抓取器（静态 + JS 回落）、持久化队列、三层去重、全部护栏、实时进度、懒加载树视图 |
 | M2 树视图 | ✅ | 虚拟滚动、懒加载、属性面板、隐藏地址、软删、撤销重做、拖拽重挂、回收站 |
 | M3 手动采集 | ✅ | CDP 画面串流 + 输入回传 + 点击捕获 + 回根识别（验收 22 项断言全过） |
-| M4 导出与开放 | ⏳ | JSON/JSONL/CSV/SQLite/Mermaid + manifest + 只读 API |
+| M4 导出与开放 | ✅ | JSON/JSONL/CSV/SQLite/Mermaid 导出 + manifest + 对外只读 API（验收 28 项，含独立第三方脚本） |
+
 
 M1 已实现的关键机制（详见 `docs/DECISIONS.md`）：
 
@@ -23,6 +24,15 @@ M1 已实现的关键机制（详见 `docs/DECISIONS.md`）：
 - **礼貌**：默认 1s/请求 + 抖动、并发 5、按域并发 2、UA 可配；
 - **可控**：暂停/继续/停止，队列与访问计数全部落库，进程重启后 `running → paused` 复位并可续跑；
 - **进度**：WS `/ws/sites/:id` 推送（400ms 节流），断线自动降级为 1.5s 轮询。
+
+M4 已实现的关键机制：
+
+- **导出**：五种格式（JSON 完整图 / JSONL 流式 / CSV 节点表+边表 / SQLite 快照 / Mermaid 树），产物落 `data/sites/<id>/exports/<exportId>/`，附 `README.md`；超过 5 万节点自动改走流式写出（内存与规模无关）；
+- **manifest.json**：下游唯一入口 —— `schemaVersion`、计数、三档分层（structure / raw / parsed）、`files` 映射（每个产物的 sha256 + bytes + 行数 + 承载数据集）、`endpoints`（只读 API 地址）；
+- **三档数据**：结构层在库里；采集时把原件写 `raw/<nodeId>.html`、解析结果写 `parsed/<nodeId>.json`（标题/描述/正文摘要/内容指纹），登记在 `materials` 表并按 nodeId 关联，导出时只引用不复制（原件层跟随预设 `downloadAssets` 开关）；
+- **对外只读 API**：`/open/v1/sites/:id/{graph.json,nodes.jsonl,edges.csv,manifest.json}` 即时导出、`/open/v1/sites/:id/nodes/:nodeId` 单节点、`/open/v1/exports/:exportId/<文件名>` 原样取回产物（带目录穿越防护），全部只读；
+- **导出页**：`/sites/:id/export` —— 选格式/范围（整站 / 子树 / 含软删）、看历史任务、看 manifest 文件清单与下游接入地址；
+- **验收方式**：`scripts/e2e-m4-export.mjs` 会起一个**与仓库无关的独立 Node 进程**（写在系统临时目录、不 import 本仓库），只给它 manifest 地址，由它自己取回全部文件并逐文件校验 sha256 —— 这就是「第三方脚本仅凭 manifest 能读取全部数据」的证据。
 
 M3 已实现的关键机制：
 
@@ -80,7 +90,7 @@ npm run dev          # server 用 tsx watch（:8787），web 用 vite（:5173，
 ## 校验
 
 ```bash
-npm test             # node --test：URL 规范化/范围、迁移与 DDL、/api/sites、采集内核与接口、WS、手动会话（97 项）
+npm test             # node --test：URL 规范化/范围、迁移与 DDL、/api/sites、采集内核与接口、WS、手动会话、导出与只读 API（108 项）
 npm run typecheck    # shared + server + web 三处 tsc --noEmit
 
 node scripts/demo-site.mjs 8899      # 起本地演示站（多级/多父/变体/404/robots/素材/SPA/分页）
@@ -89,6 +99,7 @@ node scripts/e2e-m0-screenshot.mjs   # M0 端到端 + 截图
 node scripts/e2e-m1-crawl.mjs        # M1 端到端：建站→订阅 WS→采集→树→自检→截图（14 项断言）
 node scripts/e2e-m2-tree.mjs         # M2 端到端：拖拽重挂/撤销重做/批量/属性/回收站/12k 节点压测（18 项断言）
 node scripts/e2e-m3-manual.mjs       # M3 端到端：真实 Chromium 手动点选建边/回根不重复建节点/待确认确认与丢弃（22 项断言）
+node scripts/e2e-m4-export.mjs       # M4 端到端：五种格式导出 + manifest + 只读 API + 独立第三方脚本消费（28 项断言）
 ```
 
 ## 目录结构（dev-spec §3）
@@ -101,20 +112,23 @@ server/src/
   core/extract/   links.ts content.ts
   core/store/     db.ts migrations/ effective.ts repos/{sites,nodes,edges,crawl,overrides}.ts ids.ts paths.ts
   core/override/  overrides.ts                             # 修正层用例（重挂/改地址/软删/撤销重做/回收站）
+  core/export/    dataset.ts writers.ts service.ts         # 导出：数据集投影 / 各格式写出器 / 编排与 manifest（M4）
+  core/materials/ archive.ts hash.ts                       # 素材归档：raw 原件 + parsed 解析结果（M4）
   core/sites/     service.ts                               # 站点用例（建站校验编排）
   core/manual/    session.ts capture.ts screencast.ts service.ts   # 手动会话：配对/待确认/串流节流
-  api/            server.ts errors.ts ws.ts ws-manual.ts routes/{sites,crawl,tree,manual}.ts   # open-api.ts 属 M4
+  api/            server.ts errors.ts ws.ts ws-manual.ts routes/{sites,crawl,tree,manual,export}.ts open-api.ts
   tests/          fixture-site.ts  fake-browser.ts          # 本地 fixture 站点 + 可注入的假页面会话
 web/src/
   modules/sites/  SitesPage  SiteDetailPage  SiteSubPage  SiteCard  CreateSiteForm  store  api  types
   modules/crawl/  CrawlPage  store  api  crawl.css           # 采集控制台（M1）
   modules/tree/   TreePage  store  api  tree.css             # 虚拟滚动树视图 + 修正层交互（M2）
   modules/manual/ ManualPage  RemoteBrowserView  store  api  manual.css   # 手动采集控制台（M3）
+  modules/export/ ExportPage  store  api  export.css        # 导出控制台 + manifest 展示（M4）
   components/     AppShell.tsx
   router/         modules.ts（模块名=路由名=目录名）  useRoute.ts
   styles/         tokens.css（§5 视觉规范落地）  base.css
 shared/src/       schema.ts                                # 类型契约 v1.0
-scripts/          demo-site.mjs  e2e-m0-screenshot.mjs  e2e-m1-crawl.mjs  e2e-m2-tree.mjs  e2e-m3-manual.mjs
+scripts/          demo-site.mjs  e2e-m0-screenshot.mjs  e2e-m1-crawl.mjs  e2e-m2-tree.mjs  e2e-m3-manual.mjs  e2e-m4-export.mjs
 ```
 
 约束：`web/` 不直接读数据库，只走 API；`core/` 不依赖 `api/`。
