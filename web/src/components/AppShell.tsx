@@ -52,6 +52,8 @@ export function AppShell({ active, siteId, children }: AppShellProps): React.JSX
           {MODULES.map((m) => {
             const isActive = m.key === active;
             const disabled = !m.ready;
+            // 站点级模块在列表页点了会「没反应」（targetPath 回 /sites）——明确告诉用户原因
+            const needsSite = m.perSite && siteId === null;
             return (
               <button
                 key={m.key}
@@ -59,10 +61,14 @@ export function AppShell({ active, siteId, children }: AppShellProps): React.JSX
                 className="nav__item"
                 aria-current={isActive ? 'page' : undefined}
                 data-disabled={disabled}
-                title={disabled ? `${m.label}（${m.milestone} 里程碑开放）` : m.label}
+                title={disabled ? (m.unavailableHint ?? `${m.label}：尚未开放`) : needsSite ? `${m.label}（先进入一个站点）` : m.label}
                 onClick={() => {
                   if (disabled) {
-                    window.alert(`「${m.label}」模块将在 ${m.milestone} 里程碑开放。`);
+                    window.alert(m.unavailableHint ?? `「${m.label}」模块尚未开放。`);
+                    return;
+                  }
+                  if (needsSite) {
+                    window.alert(`「${m.label}」是站点级模块：请先在「站点」里打开一个站点，再从这里进入。`);
                     return;
                   }
                   navigate(targetPath(m));
@@ -75,7 +81,7 @@ export function AppShell({ active, siteId, children }: AppShellProps): React.JSX
                   <>
                     <span className="nav__text">{m.label}</span>
                     <span className="nav__spacer" />
-                    {disabled ? <span className="badge badge--muted">{m.milestone}</span> : null}
+                    {disabled ? <span className="badge badge--muted">未开放</span> : null}
                   </>
                 ) : null}
               </button>

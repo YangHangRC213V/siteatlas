@@ -17,18 +17,24 @@ export interface ModuleDef {
   milestone: 'M0' | 'M1' | 'M2' | 'M3' | 'M4';
   /** 该模块下可直接点击的导航项（站点级模块依赖选中站点） */
   perSite: boolean;
-  /** 是否已可用（false = 导航可见但点击提示未开放） */
+  /** 是否已可用（false = 导航可见但点击提示尚未开放） */
   ready: boolean;
+  /**
+   * 未开放时的提示语。
+   * 为什么不复用 milestone 自动拼：「规则/设置」的 milestone=M1，而 M1 早已交付，
+   * 于是会弹「将在 M1 里程碑开放」——自相矛盾（踩过的坑）。明确写文案最省事也最准确。
+   */
+  unavailableHint?: string;
 }
 
 export const MODULES: ModuleDef[] = [
   { key: 'sites', label: '站点', path: '/sites', icon: '▦', milestone: 'M0', perSite: false, ready: true },
   { key: 'crawl', label: '采集', path: '/crawl', icon: '⇣', milestone: 'M1', perSite: true, ready: true },
   { key: 'tree', label: '结构', path: '/tree', icon: '⌥', milestone: 'M1', perSite: true, ready: true },
-  { key: 'data', label: '数据', path: '/data', icon: '▤', milestone: 'M4', perSite: true, ready: false },
-  { key: 'rules', label: '规则', path: '/rules', icon: '⚙', milestone: 'M1', perSite: true, ready: false },
+  { key: 'data', label: '数据', path: '/data', icon: '▤', milestone: 'M4', perSite: true, ready: false, unavailableHint: '「数据」模块（素材库与站点差异对比）尚未开发，尚未排期。' },
+  { key: 'rules', label: '规则', path: '/rules', icon: '⚙', milestone: 'M1', perSite: true, ready: false, unavailableHint: '「规则」模块（采集规则、范围与预设管理）尚未开发，尚未排期。' },
   { key: 'export', label: '导出', path: '/export', icon: '⤴', milestone: 'M4', perSite: true, ready: true },
-  { key: 'settings', label: '设置', path: '/settings', icon: '⚒', milestone: 'M1', perSite: false, ready: false },
+  { key: 'settings', label: '设置', path: '/settings', icon: '⚒', milestone: 'M1', perSite: false, ready: false, unavailableHint: '「设置」模块（限速/UA/素材开关/外观）尚未开发，尚未排期。' },
 ];
 
 export const moduleByKey = (key: ModuleKey): ModuleDef => {
