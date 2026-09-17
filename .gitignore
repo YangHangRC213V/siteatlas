@@ -1,7 +1,25 @@
+# 依赖与构建产物
 node_modules/
 dist/
+coverage/
+.vite/
+
+# 本地数据与日志
 data/
 *.log
+logs/
+
+# 环境变量与密钥(切勿提交: 含数据库口令/密钥)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+id_rsa*
+
+# 编辑器 / 系统
 .DS_Store
-.vite/
-coverage/
+.idea/
+.vscode/*
+!.vscode/extensions.json
